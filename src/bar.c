@@ -315,7 +315,6 @@ void bar_show(Bar *bar)
         bar->hide_at = time(NULL) + bar->timeout;
         for (int i = 0; i < bar->widget_count; i++)
             widget_update(bar->widgets[i]);
-        fprintf(stderr, "oxbar: OSD shown, hide in %ds\n", bar->timeout);
     }
 }
 
@@ -430,9 +429,6 @@ static void render_vertical(Bar *bar)
             if (pct > 100) pct = 100;
             if (pct < 0) pct = 0;
             int fill = bar_h * pct / 100;
-
-            fprintf(stderr, "oxbar: %s label='%s' pct=%d fill=%d/%d\n",
-                w->name, w->label, pct, fill, bar_h);
 
             unsigned long wfg = parse_hex(bar->dpy, bar->screen,
                 w->fg ? w->fg : bar->fg);

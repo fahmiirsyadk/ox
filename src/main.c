@@ -101,7 +101,6 @@ int main(int argc, char *argv[])
 
         if (show_osd) {
             show_osd = 0;
-            fprintf(stderr, "oxbar: SIGUSR1 received, showing OSD\n");
             for (Bar *b = bars; b; b = b->next) bar_show(b);
         }
 
