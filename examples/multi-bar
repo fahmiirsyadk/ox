@@ -1,4 +1,4 @@
-# oxbar configuration
+# oxbar - multi bar (left / center / right)
 
 bar left {
     position top
@@ -10,22 +10,18 @@ bar left {
     sep_color #555555
     padding 8
 
-    widget time {
-        interval 1
-    }
-
-    widget sep {}
-
+    widget time { interval 1 }
+    widget sep   {}
     widget cpu {
         icon CPU
-        interval 1
+        interval 2
+        cmd "awk '/^cpu /{u=$2+$4;s=$2+$3+$4+$5;printf \"%d%%\",(1-u/s)*100}' /proc/stat"
     }
-
-    widget sep {}
-
+    widget sep   {}
     widget mem {
         icon MEM
-        interval 1
+        interval 2
+        cmd "free -m | awk '/^Mem:/{printf \"%ldMB\",$3}'"
     }
 }
 
@@ -41,6 +37,7 @@ bar center {
 
     widget date {
         interval 60
+        cmd "date +'%a %b %d'"
     }
 }
 
@@ -56,21 +53,20 @@ bar right {
 
     widget vol {
         icon VOL
-        interval 1
+        interval 2
+        cmd "pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | grep -oP '\\d+%' | head -1 || echo '??%'"
         click cmd "pavucontrol"
     }
-
-    widget sep {}
-
+    widget sep   {}
     widget bright {
         icon LIT
         interval 5
+        cmd "awk '{printf \"%d%%\",$1*100/$2}' /sys/class/backlight/*/brightness /sys/class/backlight/*/max_brightness 2>/dev/null || echo '??%'"
     }
-
-    widget sep {}
-
+    widget sep   {}
     widget bat {
         icon BAT
         interval 30
+        cmd "if [ -f /sys/class/power_supply/BAT0/capacity ]; then printf '%d%%' $(cat /sys/class/power_supply/BAT0/capacity); else echo AC; fi"
     }
 }

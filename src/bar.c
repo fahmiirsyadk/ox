@@ -10,6 +10,18 @@
 #include "widget.h"
 #include "config.h"
 
+typedef Widget *(*WidgetCtor)(void);
+
+typedef struct {
+    const char *name;
+    WidgetCtor ctor;
+} WidgetDef;
+
+static const WidgetDef widget_registry[] = {
+    { "time", widget_time_create },
+    { NULL,   NULL               },
+};
+
 static int bar_measure_width(Bar *bar)
 {
     int width = bar->padding * 2;
@@ -96,31 +108,17 @@ Bar *bar_create(Display *dpy, int screen, ConfigBlock *cfg)
         Widget *widget = NULL;
         const char *name = child->name;
 
-        if (strcmp(name, "time") == 0)
-            widget = widget_time_create();
-        else if (strcmp(name, "date") == 0)
-            widget = widget_date_create();
-        else if (strcmp(name, "cpu") == 0)
-            widget = widget_cpu_create();
-        else if (strcmp(name, "mem") == 0)
-            widget = widget_mem_create();
-        else if (strcmp(name, "disk") == 0)
-            widget = widget_disk_create();
-        else if (strcmp(name, "net") == 0)
-            widget = widget_net_create();
-        else if (strcmp(name, "vol") == 0)
-            widget = widget_vol_create();
-        else if (strcmp(name, "bright") == 0)
-            widget = widget_bright_create();
-        else if (strcmp(name, "bat") == 0)
-            widget = widget_bat_create();
-        else if (strcmp(name, "load") == 0)
-            widget = widget_load_create();
-        else if (strcmp(name, "uptime") == 0)
-            widget = widget_uptime_create();
-        else if (strcmp(name, "sep") == 0)
+        for (const WidgetDef *d = widget_registry; d->name != NULL; d++) {
+            if (strcmp(name, d->name) == 0) {
+                widget = d->ctor();
+                break;
+            }
+        }
+
+        if (widget == NULL && strcmp(name, "sep") == 0)
             widget = widget_cmd_create("sep", NULL, NULL, 0);
-        else {
+
+        if (widget == NULL) {
             const char *cmd = config_get(child, "cmd");
             if (cmd != NULL) {
                 const char *interval_str = config_get(child, "interval");

@@ -11,17 +11,44 @@ bar main {
 
     widget time   { interval 1 }
     widget sep    {}
-    widget cpu    { icon CPU interval 1 }
+    widget cpu {
+        icon CPU
+        interval 2
+        cmd "awk '/^cpu /{u=$2+$4;s=$2+$3+$4+$5;printf \"%d%%\",(1-u/s)*100}' /proc/stat"
+    }
     widget sep    {}
-    widget mem    { icon MEM interval 1 }
+    widget mem {
+        icon MEM
+        interval 2
+        cmd "free -m | awk '/^Mem:/{printf \"%ldMB\",$3}'"
+    }
     widget sep    {}
-    widget net    { icon NET interval 1 }
+    widget net {
+        icon NET
+        interval 2
+        cmd "awk 'NR>2{rx+=$2;tx+=$10}END{printf \"%.0f/%.0fMB\",rx/1048576,tx/1048576}' /proc/net/dev"
+    }
     widget sep    {}
-    widget vol    { icon VOL interval 1 }
+    widget vol {
+        icon VOL
+        interval 2
+        cmd "pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | grep -oP '\\d+%' | head -1 || echo '??%'"
+    }
     widget sep    {}
-    widget bright { icon LIT interval 5 }
+    widget bright {
+        icon LIT
+        interval 5
+        cmd "awk '{printf \"%d%%\",$1*100/$2}' /sys/class/backlight/*/brightness /sys/class/backlight/*/max_brightness 2>/dev/null || echo '??%'"
+    }
     widget sep    {}
-    widget bat    { icon BAT interval 30 }
+    widget bat {
+        icon BAT
+        interval 30
+        cmd "if [ -f /sys/class/power_supply/BAT0/capacity ]; then printf '%d%%' $(cat /sys/class/power_supply/BAT0/capacity); else echo AC; fi"
+    }
     widget sep    {}
-    widget date   { interval 60 }
+    widget date {
+        interval 60
+        cmd "date +'%a %b %d'"
+    }
 }
