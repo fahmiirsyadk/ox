@@ -12,6 +12,7 @@
 #include "oxbar.h"
 #include "plugin.h"
 #include "config.h"
+#include "debug.h"
 
 static unsigned long parse_hex(Display *dpy, int screen, const char *hex)
 {
@@ -75,6 +76,7 @@ Bar *bar_create(Display *dpy, int screen, ConfigBlock *cfg)
 
     bar->dpy = dpy;
     bar->screen = screen;
+    bar->name = strdup(cfg->name);
 
     const char *height_str = config_get(cfg, "height");
     bar->height = height_str ? atoi(height_str) : 24;
@@ -304,18 +306,28 @@ void bar_destroy(Bar *bar)
     free(bar->fg);
     free(bar->bg);
     free(bar->sep_color);
+    free(bar->name);
     free(bar);
 }
 
 void bar_show(Bar *bar)
 {
-    if (bar->type == BAR_OSD && !bar->shown) {
+    if (bar->type != BAR_OSD)
+        return;
+
+    time_t now = time(NULL);
+
+    if (!bar->shown) {
+        if (now - (bar->hide_at - bar->timeout) < 1)
+            return;
         XMapWindow(bar->dpy, bar->win);
         bar->shown = 1;
-        bar->hide_at = time(NULL) + bar->timeout;
-        for (int i = 0; i < bar->widget_count; i++)
-            widget_update(bar->widgets[i]);
+        debug_log("OSD '%s' shown\n", bar->widgets[0]->name);
     }
+
+    bar->hide_at = now + bar->timeout;
+    for (int i = 0; i < bar->widget_count; i++)
+        widget_update(bar->widgets[i]);
 }
 
 void bar_hide(Bar *bar)
@@ -323,6 +335,7 @@ void bar_hide(Bar *bar)
     if (bar->type == BAR_OSD && bar->shown) {
         XUnmapWindow(bar->dpy, bar->win);
         bar->shown = 0;
+        debug_log("OSD '%s' hidden\n", bar->widgets[0]->name);
     }
 }
 

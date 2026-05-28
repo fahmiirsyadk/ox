@@ -1,22 +1,24 @@
 # oxbar
 
-A minimal, extensible status bar for X11 written in C.
+A minimal, extensible status bar and widget toolkit for X11 written in C.
 
 ## Why oxbar?
 
 - **Lightweight**: ~1000 lines of C, no dependencies beyond X11
 - **Fast**: Double-buffered rendering, no flicker
-- **Extensible**: Add custom widgets with shell commands or C callbacks
+- **Extensible**: Plugin architecture — add widgets as independent `.c` files
 - **Simple**: Plain text config, no Lua/Python/JSON
-- **Unix philosophy**: Do one thing well
+- **OSD widgets**: Volume/brightness progress bars triggered by keybindings
 
 ## Features
 
 - Built-in widgets: time, date, cpu, mem, disk, net, vol, bright, bat, load, uptime
 - External command widgets (run any shell command)
 - Click handlers (launch apps on widget click)
-- Per-widget update intervals
-- Configurable colors, fonts, padding
+- Mouse wheel support (scroll_up/scroll_down commands)
+- Per-widget colors (fg/bg overrides)
+- Hot config reload (`kill -HUP $(pidof oxbar)`)
+- OSD bars (transient overlays with vertical progress bars)
 - Multiple bars (left, center, right) with adaptive width
 - EWMH dock window type (reserves screen space)
 
@@ -42,8 +44,6 @@ make
 sudo make install
 ```
 
-Binary installs to `/usr/bin/oxbar`, default config to `~/.config/oxbar/config`.
-
 ### Uninstall
 
 ```bash
@@ -53,16 +53,30 @@ sudo make uninstall
 ## Usage
 
 ```bash
-oxbar                    # uses ~/.config/oxbar/config
-oxbar /path/to/config    # custom config path
-OXBAR_CONFIG=/path/to/config oxbar  # env var override
+oxbar                           # uses ~/.config/oxbar/config
+oxbar /path/to/config           # custom config path
+oxbar --debug                   # write logs to /tmp/oxbar-debug.log
+oxbar /path/to/config --debug   # custom config + debug
+```
+
+### Signals
+
+| Signal | Action |
+|--------|--------|
+| `SIGHUP` | Reload config and rebuild bars |
+| `SIGUSR1` | Show volume OSD bar |
+| `SIGUSR2` | Show brightness OSD bar |
+| `SIGINT` / `SIGTERM` | Quit |
+
+```bash
+kill -HUP $(pidof oxbar)    # reload config
+kill -USR1 $(pidof oxbar)   # show volume OSD
+kill -USR2 $(pidof oxbar)   # show brightness OSD
 ```
 
 ## Configuration
 
-Config lives at `~/.config/oxbar/config`. Format is hierarchical blocks.
-
-Multiple bars can coexist — define separate `bar` blocks with `alignment`:
+Config lives at `~/.config/oxbar/config`. Format is hierarchical blocks:
 
 ```
 bar left {
@@ -75,29 +89,37 @@ bar left {
     sep_color #555555
     padding 8
 
-    widget time  { interval 1 }
-    widget sep   {}
-    widget cpu   { icon CPU interval 1 }
-    widget sep   {}
-    widget mem   { icon MEM interval 1 }
+    widget time { interval 1 }
+    widget sep  {}
+    widget cpu  { icon CPU interval 2 cmd "awk '/^cpu /{u=$2+$4;s=$2+$3+$4+$5;printf \"%d%%\",(1-u/s)*100}' /proc/stat" }
+    widget sep  {}
+    widget mem  { icon MEM interval 2 cmd "free -m | awk '/^Mem:/{printf \"%ldMB\",$3}'" }
 }
 
 bar center {
     position top
     alignment center
     height 24
-    widget date { interval 60 }
+    widget date { interval 60 cmd "date +'%a %b %d'" }
 }
 
-bar right {
-    position top
-    alignment right
-    height 24
-    widget vol    { icon VOL interval 1 }
-    widget sep    {}
-    widget bright { icon LIT interval 5 }
-    widget sep    {}
-    widget bat    { icon BAT interval 30 }
+bar vol_osd {
+    type osd
+    position left
+    orientation vertical
+    height 200
+    width 30
+    timeout 3
+    fg #ffffff
+    bg #111111
+
+    widget volume {
+        icon VOL
+        render progress
+        interval 0.1
+        cmd "pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | grep -oP '\\d+%' | head -1 | grep -oP '\\d+' || echo '0'"
+        fg #4488ff
+    }
 }
 ```
 
@@ -107,7 +129,11 @@ bar right {
 |-----|---------|-------------|
 | `position` | `top` | `top` or `bottom` |
 | `alignment` | `left` | `left`, `center`, `right`, or `stretch` |
+| `type` | `normal` | `normal` or `osd` |
+| `orientation` | `horizontal` | `horizontal` or `vertical` |
+| `timeout` | `3` | OSD auto-hide seconds |
 | `height` | `24` | Bar height in pixels |
+| `width` | auto | Bar width (for vertical bars) |
 | `font` | `monospace:size=11` | Xft font name |
 | `fg` | `#ffffff` | Foreground color (hex) |
 | `bg` | `#000000` | Background color (hex) |
@@ -120,177 +146,48 @@ bar right {
 |-----|---------|-------------|
 | `interval` | varies | Update interval in seconds |
 | `icon` | none | Icon/label prefix |
-| `click cmd` | none | Shell command to run on click |
-| `cmd` | none | Shell command for external widget |
+| `cmd` | none | Shell command for widget output |
+| `click` | none | Shell command to run on click |
+| `scroll_up` | none | Shell command for mouse wheel up |
+| `scroll_down` | none | Shell command for mouse wheel down |
+| `render` | `text` | `text` or `progress` (for OSD bars) |
+| `fg` | bar fg | Per-widget foreground color |
+| `bg` | none | Per-widget background color |
 
-### Built-in widgets
+### Plugins
 
-| Widget | Default interval | Description |
-|--------|------------------|-------------|
-| `time` | 1s | Current time (HH:MM:SS) |
-| `date` | 60s | Current date (Day Mon DD) |
-| `cpu` | 1s | CPU usage percentage |
-| `mem` | 1s | Memory usage in MB |
-| `disk` | 30s | Disk usage (used/total) |
-| `net` | 1s | Network RX/TX in MB |
-| `vol` | 1s | PulseAudio volume |
-| `bright` | 5s | Backlight brightness % |
-| `bat` | 30s | Battery percentage |
-| `load` | 1s | System load average |
-| `uptime` | 60s | System uptime |
-| `sep` | - | Separator (`|`) |
+Widgets are independent `.c` files in `plugins/`. To add a new widget:
 
-### External command widgets
-
-Run any shell command and display its output:
-
-```
-widget weather {
-    icon WEATHER
-    cmd "curl -s wttr.in/?format=3 | cut -d: -f2"
-    interval 300
-}
-```
-
-The command's stdout becomes the widget label. Exit code is ignored.
-
-## Extending with custom widgets
-
-### Shell command widgets
-
-For simple data sources, use external command widgets (see above). No recompilation needed.
-
-### C callback widgets
-
-For performance-critical or complex widgets, add a C implementation:
-
-**1. Add update function in `widget.c`:**
+1. Create `plugins/foo.c`:
 
 ```c
-static void update_mywidget(void *ctx, char *buf, size_t len) {
-    (void)ctx;
-    // Read data from /proc, /sys, or compute it
-    snprintf(buf, len, "value: %d", some_value);
+#include "oxbar.h"
+#include "plugin.h"
+
+static Widget *create(void) {
+    return widget_create("foo", NULL, 2.0, update_cmd, NULL);
 }
+void plugin_init_foo(void) { plugin_register("foo", create); }
 ```
 
-**2. Add create function in `widget.c`:**
+2. Add to `src/plugin.c`:
 
 ```c
-Widget *widget_mywidget_create(void) {
-    return widget_create("mywidget", NULL, 1.0, update_mywidget, NULL, NULL);
-}
+extern void plugin_init_foo(void);
+// in plugin_init_all():
+plugin_init_foo();
 ```
 
-Parameters: `name`, `icon`, `interval`, `update_fn`, `click_fn`, `ctx`.
-
-**3. Declare in `widget.h`:**
-
-```c
-Widget *widget_mywidget_create(void);
-```
-
-**4. Register in `bar.c` `bar_create()` widget factory:**
-
-```c
-} else if (strcmp(name, "mywidget") == 0) {
-    widget = widget_mywidget_create();
-}
-```
-
-**5. Use in config:**
+3. Use in config:
 
 ```
-widget mywidget {
-    icon MW
-    interval 1
-}
+widget foo { icon FOO interval 2 cmd "your-command" }
 ```
-
-### Widget callback signature
-
-```c
-typedef void (*WidgetUpdate)(void *ctx, char *buf, size_t len);
-typedef void (*WidgetClick)(void *ctx);
-```
-
-- `ctx`: User data passed at creation (e.g., command string for external widgets)
-- `buf`: Buffer to write label into (256 bytes)
-- `len`: Buffer size
-- Click handlers receive `ctx` and can fork/exec commands
-
-### Example: Temperature widget
-
-```c
-static void update_temp(void *ctx, char *buf, size_t len) {
-    (void)ctx;
-    FILE *f = fopen("/sys/class/thermal/thermal_zone0/temp", "r");
-    if (f == NULL) {
-        snprintf(buf, len, "??°C");
-        return;
-    }
-    int temp = 0;
-    fscanf(f, "%d", &temp);
-    fclose(f);
-    snprintf(buf, len, "%d°C", temp / 1000);
-}
-
-Widget *widget_temp_create(void) {
-    return widget_create("temp", NULL, 5.0, update_temp, NULL, NULL);
-}
-```
-
-## Architecture
-
-```
-main.c          Entry point, main loop, event handling
-bar.c           Window creation, double-buffered rendering
-widget.c        Widget implementations and lifecycle
-config.c        Hierarchical config parser
-```
-
-### Rendering pipeline
-
-1. Main loop updates widgets based on intervals
-2. `bar_render()` clears back buffer (Pixmap)
-3. Draws widgets to back buffer via Xft
-4. Copies back buffer to window (atomic update, no flicker)
-5. Flushes X11 commands
-
-### Event loop
-
-- 100ms tick (10 FPS)
-- Processes ButtonPress events
-- Calls widget click handlers
-
-## Contributing
-
-1. Fork the repo
-2. Create a feature branch
-3. Make changes
-4. Test with `make clean && make`
-5. Submit PR
-
-### Code style
-
-- C11 standard
-- 4-space indent
-- K&R braces
-- No trailing whitespace
-- Meaningful variable names
-- Comments for non-obvious logic
-
-## License
-
-MIT License - see LICENSE file for details.
 
 ## TODO
 
-- [ ] Hot config reload (SIGHUP)
-- [ ] Per-widget colors
 - [ ] Gradient backgrounds
 - [ ] Image/icon support (PNG via Imlib2)
-- [ ] Mouse wheel events
 - [ ] Tooltip popups
 - [ ] Multi-monitor support (per-output bars)
 - [ ] Workspace indicators
@@ -305,10 +202,6 @@ MIT License - see LICENSE file for details.
 - [xmobar](https://codeberg.org/xmobar/xmobar) - Haskell, powerful but heavy
 - [i3status](https://github.com/i3/i3status) - i3-specific, limited customization
 
-oxbar sits between lemonbar (too minimal) and polybar (too complex).
-
 ## Credits
 
-Built with [Xft](https://www.freedesktop.org/wiki/Software/Xft/) for font rendering.
-
-Inspired by [dwm](https://dwm.suckless.org/) and [suckless](https://suckless.org/) philosophy.
+Built with [Xft](https://www.freedesktop.org/wiki/Software/Xft/) for font rendering. Inspired by [suckless](https://suckless.org/) philosophy.

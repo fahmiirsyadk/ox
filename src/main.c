@@ -9,17 +9,21 @@
 #include "oxbar.h"
 #include "plugin.h"
 #include "config.h"
+#include "debug.h"
 
 static volatile int running = 1;
 static volatile int reload = 0;
-static volatile int show_osd = 0;
+static volatile int show_vol = 0;
+static volatile int show_bright = 0;
 
 static void sig_handler(int sig)
 {
     if (sig == SIGHUP)
         reload = 1;
     else if (sig == SIGUSR1)
-        show_osd = 1;
+        show_vol = 1;
+    else if (sig == SIGUSR2)
+        show_bright = 1;
     else
         running = 0;
 }
@@ -50,6 +54,14 @@ static int bars_create(Display *dpy, int screen, Config *cfg, Bar **bars)
     return *bars != NULL;
 }
 
+static void show_osd_by_name(Bar *bars, const char *name)
+{
+    debug_log("SIGUSR %s\n", name);
+    for (Bar *b = bars; b; b = b->next)
+        if (b->type == BAR_OSD && strcmp(b->name, name) == 0)
+            bar_show(b);
+}
+
 int main(int argc, char *argv[])
 {
     const char *config_path = getenv("OXBAR_CONFIG");
@@ -59,12 +71,20 @@ int main(int argc, char *argv[])
         snprintf(path, sizeof(path), "%s/.config/oxbar/config", config_path);
         config_path = strdup(path);
     }
-    if (argc > 1) config_path = argv[1];
+    if (argc > 1 && strcmp(argv[1], "--debug") == 0) {
+        oxbar_debug = 1;
+        if (argc > 2) config_path = argv[2];
+    } else if (argc > 1) {
+        config_path = argv[1];
+        if (argc > 2 && strcmp(argv[2], "--debug") == 0)
+            oxbar_debug = 1;
+    }
 
     struct sigaction sa = { .sa_handler = sig_handler, .sa_flags = SA_RESTART };
     sigemptyset(&sa.sa_mask);
     sigaction(SIGHUP, &sa, NULL);
     sigaction(SIGUSR1, &sa, NULL);
+    sigaction(SIGUSR2, &sa, NULL);
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
 
@@ -96,13 +116,11 @@ int main(int argc, char *argv[])
             cfg = config_parse(config_path);
             if (!cfg) { fprintf(stderr, "oxbar: config reload failed\n"); break; }
             bars_create(dpy, screen, cfg, &bars);
-            fprintf(stderr, "oxbar: config reloaded\n");
+            debug_log("config reloaded\n");
         }
 
-        if (show_osd) {
-            show_osd = 0;
-            for (Bar *b = bars; b; b = b->next) bar_show(b);
-        }
+        if (show_vol) { show_vol = 0; show_osd_by_name(bars, "vol_osd"); }
+        if (show_bright) { show_bright = 0; show_osd_by_name(bars, "bright_osd"); }
 
         time_t now = time(NULL);
         for (Bar *b = bars; b; b = b->next)

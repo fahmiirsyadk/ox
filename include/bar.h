@@ -21,6 +21,7 @@ typedef struct Bar {
     GC gc;
     XftDraw *draw;
     XftFont *font;
+    char *name;
     int x;
     int y;
     int width;

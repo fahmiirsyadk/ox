@@ -30,16 +30,16 @@ bar main {
         interval 2
         cmd "pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | grep -oP '\\d+%' | head -1 || echo '??%'"
         click "pavucontrol"
-        scroll_up "pactl set-sink-volume @DEFAULT_SINK@ +5% && kill -USR1 $(pidof oxbar)"
-        scroll_down "pactl set-sink-volume @DEFAULT_SINK@ -5% && kill -USR1 $(pidof oxbar)"
+        scroll_up "pactl set-sink-volume @DEFAULT_SINK@ +5%"
+        scroll_down "pactl set-sink-volume @DEFAULT_SINK@ -5%"
     }
     widget sep    {}
     widget bright {
         icon LIT
         interval 5
         cmd "paste /sys/class/backlight/*/brightness /sys/class/backlight/*/max_brightness 2>/dev/null | awk '{printf \"%d%%\",$1*100/$2}' || echo '??%'"
-        scroll_up "brightnessctl set +5% && kill -USR1 $(pidof oxbar)"
-        scroll_down "brightnessctl set 5%- && kill -USR1 $(pidof oxbar)"
+        scroll_up "brightnessctl set +5% && pkill -USR2 oxbar"
+        scroll_down "brightnessctl set 5%- && pkill -USR2 oxbar"
         fg #ffff00
     }
     widget sep    {}
@@ -70,7 +70,7 @@ bar vol_osd {
     widget volume {
         icon VOL
         render progress
-        interval 0.5
+        interval 0.1
         cmd "pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | grep -oP '\\d+%' | head -1 | grep -oP '\\d+' || echo '0'"
         fg #4488ff
     }
@@ -90,7 +90,7 @@ bar bright_osd {
     widget brightness {
         icon LIT
         render progress
-        interval 0.5
+        interval 0.1
         cmd "paste /sys/class/backlight/*/brightness /sys/class/backlight/*/max_brightness 2>/dev/null | awk '{printf \"%d\",$1*100/$2}' || echo '0'"
         fg #ffff00
     }
