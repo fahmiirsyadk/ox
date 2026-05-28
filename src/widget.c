@@ -63,5 +63,6 @@ void update_cmd(void *ctx, char *buf, size_t len)
 Widget *widget_cmd_create(const char *name, const char *icon,
                           const char *cmd, double interval)
 {
-    return widget_create(name, icon, interval, update_cmd, (void *)cmd);
+    return widget_create(name, icon, interval, update_cmd,
+        cmd ? strdup(cmd) : NULL);
 }

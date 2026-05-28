@@ -161,6 +161,13 @@ Bar *bar_create(Display *dpy, int screen, ConfigBlock *cfg)
         if (interval_str != NULL)
             widget->interval = atof(interval_str);
 
+        const char *cmd = config_get(child, "cmd");
+        if (cmd != NULL) {
+            free(widget->ctx);
+            widget->ctx = strdup(cmd);
+            widget->update = update_cmd;
+        }
+
         const char *click = config_get(child, "click");
         if (click != NULL)
             widget->click_cmd = strdup(click);
