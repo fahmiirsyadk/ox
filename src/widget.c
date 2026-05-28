@@ -32,8 +32,7 @@ static void run_cmd(const char *cmd, char *buf, size_t len)
 }
 
 Widget *widget_create(const char *name, const char *icon,
-                      double interval, WidgetUpdate update,
-                      WidgetClick click, void *ctx)
+                      double interval, WidgetUpdate update, void *ctx)
 {
     Widget *widget = calloc(1, sizeof(Widget));
     if (widget == NULL)
@@ -44,7 +43,6 @@ Widget *widget_create(const char *name, const char *icon,
     widget->label = calloc(256, sizeof(char));
     widget->interval = interval;
     widget->update = update;
-    widget->click = click;
     widget->ctx = ctx;
 
     return widget;
@@ -57,6 +55,7 @@ void widget_destroy(Widget *widget)
     free(widget->name);
     free(widget->icon);
     free(widget->label);
+    free(widget->click_cmd);
     free(widget);
 }
 
@@ -77,7 +76,7 @@ static void update_time(void *ctx, char *buf, size_t len)
 
 Widget *widget_time_create(void)
 {
-    return widget_create("time", NULL, 1.0, update_time, NULL, NULL);
+    return widget_create("time", NULL, 1.0, update_time, NULL);
 }
 
 static void update_cmd(void *ctx, char *buf, size_t len)
@@ -89,21 +88,9 @@ static void update_cmd(void *ctx, char *buf, size_t len)
         buf[0] = '\0';
 }
 
-static void click_cmd(void *ctx)
-{
-    const char *cmd = (const char *)ctx;
-    if (cmd != NULL) {
-        if (fork() == 0) {
-            setsid();
-            execl("/bin/sh", "sh", "-c", cmd, NULL);
-            _exit(1);
-        }
-    }
-}
-
 Widget *widget_cmd_create(const char *name, const char *icon,
                           const char *cmd, double interval)
 {
     return widget_create(name, icon, interval,
-        update_cmd, click_cmd, (void *)cmd);
+        update_cmd, (void *)cmd);
 }

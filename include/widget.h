@@ -2,15 +2,14 @@
 #define WIDGET_H
 
 typedef void (*WidgetUpdate)(void *ctx, char *buf, size_t len);
-typedef void (*WidgetClick)(void *ctx);
 
 typedef struct Widget {
     char *name;
     char *icon;
     char *label;
+    char *click_cmd;
     double interval;
     WidgetUpdate update;
-    WidgetClick click;
     void *ctx;
     double last_update;
     int x;
@@ -18,8 +17,7 @@ typedef struct Widget {
 } Widget;
 
 Widget *widget_create(const char *name, const char *icon,
-                      double interval, WidgetUpdate update,
-                      WidgetClick click, void *ctx);
+                      double interval, WidgetUpdate update, void *ctx);
 void widget_destroy(Widget *widget);
 void widget_update(Widget *widget);
 

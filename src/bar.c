@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <unistd.h>
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #include <X11/Xft/Xft.h>
@@ -140,6 +141,10 @@ Bar *bar_create(Display *dpy, int screen, ConfigBlock *cfg)
         const char *interval_str = config_get(child, "interval");
         if (interval_str != NULL)
             widget->interval = atof(interval_str);
+
+        const char *click = config_get(child, "click");
+        if (click != NULL)
+            widget->click_cmd = strdup(click);
 
         widget_update(widget);
         bar->widgets[bar->widget_count++] = widget;
@@ -313,9 +318,15 @@ void bar_render(Bar *bar)
 void bar_click(Bar *bar, int x)
 {
     for (int i = 0; i < bar->widget_count; i++) {
-        Widget *widget = bar->widgets[i];
-        if (widget->click != NULL && widget->label[0] != '\0' &&
-            x >= widget->x && x < widget->x + widget->w)
-            widget->click(widget->ctx);
+        Widget *w = bar->widgets[i];
+        if (w->click_cmd == NULL || w->label[0] == '\0')
+            continue;
+        if (x < w->x || x >= w->x + w->w)
+            continue;
+        if (fork() == 0) {
+            setsid();
+            execl("/bin/sh", "sh", "-c", w->click_cmd, NULL);
+            _exit(1);
+        }
     }
 }
