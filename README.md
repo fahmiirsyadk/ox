@@ -9,15 +9,29 @@ No config files. Write C, not config.
 ```c
 #include "ox.h"
 
+static void my_update(void *ctx, char *buf, size_t len) {
+    (void)ctx;
+    time_t t = time(NULL);
+    struct tm *tm = localtime(&t);
+    snprintf(buf, len, "%02d:%02d:%02d", tm->tm_hour, tm->tm_min, tm->tm_sec);
+}
+
+static void render(OxWindow *win, void *ctx) {
+    (void)ctx;
+    OxWidget *w = ctx;
+    ox_draw_rect(win, 0, 0, 200, 28, "#000000");
+    ox_draw_text(win, 8, 18, ox_widget_get_label(w), "#ffffff");
+}
+
 int main(void) {
     ox_init();
-
     OxWindow *win = ox_window_new(0, 0, 200, 28);
     ox_window_set_bg(win, "#000000");
     ox_window_show(win);
 
     OxWidget *w = ox_widget_new("clock", 1.0);
     ox_widget_set_update(w, my_update, NULL);
+    ox_window_set_render(win, render, w);
 
     ox_run();
     return 0;
@@ -32,354 +46,366 @@ make
 
 Dependencies: libx11, libxft, libxpm, freetype2, fontconfig
 
+## Architecture
+
+ox uses an **event-driven rendering** model:
+
+- Widgets update in background threads (non-blocking)
+- Rendering only happens when widget data changes (`dirty` flag)
+- X11 `ExposeEvent` triggers redraw
+- No fixed 100ms timer — redraws on demand
+
+```
+┌─────────────────────────────────────────────┐
+│                 Event Loop                   │
+│  ┌─────────┐  ┌──────────┐  ┌────────────┐ │
+│  │ Widgets │  │ X11      │  │ Rendering  │ │
+│  │ (dirty) │→ │ Events   │→ │ (on change)│ │
+│  └─────────┘  └──────────┘  └────────────┘ │
+│       ↑              ↑              │       │
+│  ┌─────────┐  ┌──────────┐  ┌──────┴─────┐ │
+│  │ Threads │  │ Expose   │  │ Draw       │ │
+│  │ (popen) │  │ Click    │  │ (Xft/XPM)  │ │
+│  └─────────┘  └──────────┘  └────────────┘ │
+└─────────────────────────────────────────────┘
+```
+
 ## API Reference
 
-### ox_init
+### Core
+
+#### ox_init
 
 ```c
 void ox_init(void);
 ```
 
-Initialize the ox library. Must be called before any other ox function. Opens the X11 display connection.
+Initialize ox. Opens X11 display. Must be called first.
 
-### ox_run
+#### ox_run
 
 ```c
 void ox_run(void);
 ```
 
-Start the event loop. Blocks until `ox_quit()` is called or a termination signal is received. Handles X11 events (clicks, exposure) and widget updates.
+Start event loop. Blocks until `ox_quit()` or signal.
 
-### ox_quit
+#### ox_quit
 
 ```c
 void ox_quit(void);
 ```
 
-Stop the event loop. Can be called from signal handlers or click callbacks.
+Stop event loop.
+
+#### ox_display / ox_screen
+
+```c
+Display *ox_display(void);
+int ox_screen(void);
+```
+
+Get X11 display and screen for direct Xlib calls.
 
 ---
 
-### ox_widget_new
+### Widget
+
+#### ox_widget_new
 
 ```c
 OxWidget *ox_widget_new(const char *name, double interval);
 ```
 
-Create a new widget.
+Create widget. `interval` in seconds (0 = manual update).
 
-- `name` — identifier string (used for lookup, logging)
-- `interval` — update interval in seconds (0 = never auto-update)
-
-Returns a newly allocated widget. Free with `ox_widget_destroy()`.
-
-### ox_widget_destroy
+#### ox_widget_destroy
 
 ```c
 void ox_widget_destroy(OxWidget *w);
 ```
 
-Free a widget and its resources.
+Free widget.
 
-### ox_widget_set_update
+#### ox_widget_set_update
 
 ```c
 void ox_widget_set_update(OxWidget *w, OxWidgetUpdate update, void *ctx);
 ```
 
-Set the update callback. Called when the widget's interval elapses.
+Set update callback: `void (*)(void *ctx, char *buf, size_t len)`.
 
-- `update` — function signature: `void (*)(void *ctx, char *buf, size_t len)`
-- `ctx` — opaque pointer passed to the callback
+Callback writes output to `buf` (256 bytes). If output changes, widget is marked dirty.
 
-The callback writes its output into `buf` (256 bytes max).
-
-### ox_widget_set_click
+#### ox_widget_set_click
 
 ```c
 void ox_widget_set_click(OxWidget *w, OxWidgetClick click);
 ```
 
-Set the click callback. Called when the widget is clicked.
+Set click callback: `void (*)(void *ctx)`.
 
-- `click` — function signature: `void (*)(void *ctx)`
-
-### ox_widget_set_icon
+#### ox_widget_set_icon
 
 ```c
 void ox_widget_set_icon(OxWidget *w, const char *icon);
 ```
 
-Set an icon prefix. Rendered before the label text. Set to `""` or `NULL` for no icon.
+Set icon prefix. Rendered before label text.
 
-### ox_widget_set_label_text
+#### ox_widget_set_label_text
 
 ```c
 void ox_widget_set_label_text(OxWidget *w, const char *text);
 ```
 
-Set a static label. Use for widgets that don't need periodic updates (interval=0).
+Set static label (for interval=0 widgets).
 
-### ox_widget_set_colors
+#### ox_widget_set_colors
 
 ```c
 void ox_widget_set_colors(OxWidget *w, const char *fg, const char *bg);
 ```
 
-Override per-widget colors. Pass `NULL` to use the bar's default colors.
+Override per-widget colors. `NULL` = use bar default.
 
-- `fg` — foreground color (hex, e.g., `"#ff0000"`)
-- `bg` — background color (hex, or `NULL` for transparent)
-
-### ox_widget_set_render_progress
+#### ox_widget_set_render_progress
 
 ```c
 void ox_widget_set_render_progress(OxWidget *w, int enable);
 ```
 
-Enable progress bar rendering. When enabled, the widget's label is interpreted as a percentage (0-100) and rendered as a filled bar.
+Enable progress bar rendering (label = percentage 0-100).
 
-### ox_widget_update
+#### ox_widget_update
 
 ```c
 void ox_widget_update(OxWidget *w);
 ```
 
-Manually trigger the update callback. Normally called by the event loop based on interval.
+Trigger update callback. Auto-called when interval elapses.
 
-### ox_widget_do_click
+#### ox_widget_do_click
 
 ```c
 void ox_widget_do_click(OxWidget *w);
 ```
 
-Invoke the widget's click callback programmatically.
+Invoke click callback programmatically.
 
-### ox_widget_get_name
+#### ox_widget_is_dirty / ox_widget_clear_dirty
+
+```c
+int ox_widget_is_dirty(OxWidget *w);
+void ox_widget_clear_dirty(OxWidget *w);
+```
+
+Check/clear dirty flag. Widget is marked dirty when update produces new output.
+
+#### Getters
 
 ```c
 const char *ox_widget_get_name(OxWidget *w);
-```
-
-Get the widget's name.
-
-### ox_widget_get_label
-
-```c
 const char *ox_widget_get_label(OxWidget *w);
-```
-
-Get the widget's current label text (output of the last update callback).
-
-### ox_widget_get_icon
-
-```c
 const char *ox_widget_get_icon(OxWidget *w);
-```
-
-Get the widget's icon string.
-
-### ox_widget_get_fg
-
-```c
 const char *ox_widget_get_fg(OxWidget *w);
-```
-
-Get the widget's foreground color override, or `NULL` if using bar default.
-
-### ox_widget_get_bg
-
-```c
 const char *ox_widget_get_bg(OxWidget *w);
-```
-
-Get the widget's background color override, or `NULL` if using bar default.
-
-### ox_widget_get_interval
-
-```c
 double ox_widget_get_interval(OxWidget *w);
-```
-
-Get the widget's update interval in seconds.
-
-### ox_widget_get_last_update
-
-```c
 double ox_widget_get_last_update(OxWidget *w);
-```
-
-Get the timestamp of the last update (monotonic clock, seconds).
-
-### ox_widget_set_last_update
-
-```c
 void ox_widget_set_last_update(OxWidget *w, double t);
 ```
 
-Set the last update timestamp. Used by the event loop to track when to call the update callback.
-
 ---
 
-### ox_window_new
+### Window
+
+#### ox_window_new
 
 ```c
 OxWindow *ox_window_new(int x, int y, int w, int h);
 ```
 
-Create a new X11 window. Sets override_redirect (bypasses WM), sets `_NET_WM_WINDOW_TYPE_DOCK`, and prepares an Xft drawing context.
+Create X11 window. Sets override_redirect, `_NET_WM_WINDOW_TYPE_DOCK`, `ExposureMask`.
 
-- `x, y` — screen position (pixels)
-- `w, h` — window dimensions (pixels)
-
-Returns a newly allocated window. Free with `ox_window_destroy()`.
-
-### ox_window_destroy
+#### ox_window_destroy
 
 ```c
 void ox_window_destroy(OxWindow *win);
 ```
 
-Free a window and its resources.
+Free window.
 
-### ox_window_set_bg
+#### ox_window_set_bg
 
 ```c
 void ox_window_set_bg(OxWindow *win, const char *color);
 ```
 
-Set the background color. Stored for use by `ox_draw_rect()`.
+Set background color. Marks window dirty.
 
-- `color` — hex color string (e.g., `"#000000"`)
-
-### ox_window_set_font
+#### ox_window_set_font
 
 ```c
 void ox_window_set_font(OxWindow *win, const char *font);
 ```
 
-Set the Xft font. Affects all subsequent `ox_draw_text()` calls on this window.
+Set Xft font. Marks window dirty.
 
-- `font` — Xft font name (e.g., `"monospace:size=11"`)
+#### ox_window_set_render
 
-### ox_window_set_click
+```c
+void ox_window_set_render(OxWindow *win, OxRenderFn fn, void *ctx);
+```
+
+Set render callback: `void (*)(OxWindow *win, void *ctx)`.
+
+Called when window needs drawing (initial, expose, dirty widgets).
+
+#### ox_window_set_click
 
 ```c
 void ox_window_set_click(OxWindow *win, OxWindowClick click);
 ```
 
-Set a click handler for the entire window.
+Set window click handler.
 
-- `click` — function signature: `void (*)(OxWindow *win, int x, int y, int button)`
-
-### ox_window_set_strut
+#### ox_window_set_strut
 
 ```c
 void ox_window_set_strut(OxWindow *win, int top, int bottom, int left, int right);
 ```
 
-Set EWMH struts to reserve screen space. Prevents maximized windows from overlapping your bar.
+Set EWMH struts. Reserves screen space.
 
-- `top` — pixels to reserve at top (e.g., bar height)
-
-### ox_window_show
+#### ox_window_show / ox_window_hide
 
 ```c
 void ox_window_show(OxWindow *win);
-```
-
-Map (show) the window.
-
-### ox_window_hide
-
-```c
 void ox_window_hide(OxWindow *win);
 ```
 
-Unmap (hide) the window.
+Map/unmap window.
 
-### ox_window_move
+#### ox_window_move / ox_window_resize
 
 ```c
 void ox_window_move(OxWindow *win, int x, int y);
-```
-
-Move the window to a new position.
-
-### ox_window_resize
-
-```c
 void ox_window_resize(OxWindow *win, int w, int h);
 ```
 
-Resize the window.
+Move/resize window.
 
-### ox_window_handle
+#### ox_window_handle
 
 ```c
 Window ox_window_handle(OxWindow *win);
 ```
 
-Get the underlying X11 `Window` handle. Used for matching `XEvent.xbutton.window` in click handlers.
+Get X11 Window handle for event matching.
 
 ---
 
-### ox_draw_rect
+### Draw
+
+#### ox_draw_rect
 
 ```c
 void ox_draw_rect(OxWindow *win, int x, int y, int w, int h, const char *color);
 ```
 
-Draw a filled rectangle.
+Draw filled rectangle.
 
-- `color` — hex color string (e.g., `"#000000"`)
-
-### ox_draw_text
+#### ox_draw_text
 
 ```c
 void ox_draw_text(OxWindow *win, int x, int y, const char *text, const char *fg);
 ```
 
-Draw text using the window's current font.
+Draw text with foreground color.
 
-- `text` — UTF-8 string
-- `fg` — foreground color (hex)
-
-### ox_draw_xpm
+#### ox_draw_xpm
 
 ```c
 void ox_draw_xpm(OxWindow *win, int x, int y, const char *path);
 ```
 
-Draw an XPM image.
+Draw XPM image from file.
 
-- `path` — filesystem path to `.xpm` file
-
-### ox_draw_sep
+#### ox_draw_sep
 
 ```c
 void ox_draw_sep(OxWindow *win, int x, int y, const char *sep, const char *fg);
 ```
 
-Draw a separator string (same as `ox_draw_text`, semantic alias).
+Draw separator (alias for `ox_draw_text`).
 
-### ox_draw_flush
+#### ox_draw_flush
 
 ```c
 void ox_draw_flush(OxWindow *win);
 ```
 
-Flush pending X11 drawing commands.
+Flush X11 drawing commands.
 
-### ox_text_width
+#### ox_text_width
 
 ```c
 int ox_text_width(OxWindow *win, const char *text);
 ```
 
-Measure the pixel width of a text string using the window's current font.
+Measure text pixel width.
 
 ---
+
+## Event Loop Pattern
+
+```c
+for (;;) {
+    /* 1. Update widgets on interval */
+    for (int i = 0; i < n; i++) {
+        OxWidget *w = widgets[i];
+        if (ox_widget_get_interval(w) > 0 &&
+            cur - ox_widget_get_last_update(w) >= ox_widget_get_interval(w)) {
+            ox_widget_update(w);  /* sets dirty if output changed */
+            ox_widget_set_last_update(w, cur);
+        }
+    }
+
+    /* 2. Redraw only if something changed */
+    int any_dirty = 0;
+    for (int i = 0; i < n; i++)
+        if (ox_widget_is_dirty(widgets[i])) any_dirty = 1;
+
+    if (any_dirty) {
+        render(win, ctx);
+        for (int i = 0; i < n; i++)
+            ox_widget_clear_dirty(widgets[i]);
+    }
+
+    /* 3. Handle X11 events */
+    while (XPending(dpy) > 0) {
+        XEvent ev;
+        XNextEvent(dpy, &ev);
+        if (ev.type == Expose) render(win, ctx);  /* expose = redraw */
+        if (ev.type == ButtonPress) { /* handle clicks */ }
+    }
+
+    XFlush(dpy);
+    nanosleep(&ts, NULL);
+}
+```
+
+## Threaded Commands
+
+Shell commands run in background threads:
+
+```c
+OxWidget *w = ox_widget_new("vol", 5.0);
+/* Widget runs: pactl get-sink-volume ... in a pthread */
+/* Non-blocking, updates label when complete */
+```
+
+Output is compared to previous label. If different, widget is marked dirty.
 
 ## Signals
 
@@ -388,8 +414,8 @@ Measure the pixel width of a text string using the window's current font.
 | `SIGINT` | Quit |
 | `SIGTERM` | Quit |
 | `SIGHUP` | Quit |
-| `SIGUSR1` | Custom (e.g., show volume OSD) |
-| `SIGUSR2` | Custom (e.g., show brightness OSD) |
+| `SIGUSR1` | Custom |
+| `SIGUSR2` | Custom |
 
 ## License
 
