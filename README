@@ -1,417 +1,472 @@
-# ox
+ox
 ________________________________________________________________________________
 
-A minimal C toolkit for building X11 status bars and widgets.
-
-No config files. Write C, not config.
+  A minimal C toolkit for building X11 status bars and widgets.
+  No config files. Write C, not config.
 
 
 [00] Quick Start
 ________________________________________________________________________________
 
-```c
-#include "ox.h"
+  #include "ox.h"
 
-static void clock_update(void *ctx, char *buf, size_t len) {
-    (void)ctx;
-    time_t t = time(NULL);
-    struct tm *tm = localtime(&t);
-    snprintf(buf, len, "%02d:%02d:%02d", tm->tm_hour, tm->tm_min, tm->tm_sec);
-}
+  static void clock_update(void *ctx, char *buf, size_t len) {
+      (void)ctx;
+      time_t t = time(NULL);
+      struct tm *tm = localtime(&t);
+      snprintf(buf, len, "%02d:%02d:%02d", tm->tm_hour, tm->tm_min, tm->tm_sec);
+  }
 
-static void on_timeout(OxMain *m, double now) {
-    OxWidget *w = m->ctx;
-    if (now - ox_widget_get_last_update(w) >= ox_widget_get_interval(w)) {
-        ox_widget_update(w);
-        ox_widget_set_last_update(w, now);
-    }
-}
+  static void on_timeout(OxMain *m, double now) {
+      OxWidget *w = m->ctx;
+      if (now - ox_widget_get_last_update(w) >= ox_widget_get_interval(w)) {
+          ox_widget_update(w);
+          ox_widget_set_last_update(w, now);
+      }
+  }
 
-static void on_event(OxMain *m, XEvent *ev) {
-    (void)ev;
-    OxWidget *w = m->ctx;
-    OxWindow *win = ox_window_handle(/* your window */);
-    if (ev->type == Expose) {
-        ox_draw_rect(win, 0, 0, 200, 28, "#000000");
-        ox_draw_text(win, 8, 18, ox_widget_get_label(w), "#ffffff");
-    }
-}
+  static void on_event(OxMain *m, XEvent *ev) {
+      (void)ev;
+      OxWidget *w = m->ctx;
+      if (ev->type == Expose) {
+          ox_draw_rect(win, 0, 0, 200, 28, "#000000");
+          ox_draw_text(win, 8, 18, ox_widget_get_label(w), "#ffffff");
+      }
+  }
 
-int main(void) {
-    ox_init();
+  int main(void) {
+      ox_init();
 
-    OxWindow *win = ox_window_new(0, 0, 200, 28);
-    ox_window_set_bg(win, "#000000");
-    ox_window_show(win);
+      OxWindow *win = ox_window_new(0, 0, 200, 28);
+      ox_window_set_bg(win, "#000000");
+      ox_window_show(win);
 
-    OxWidget *w = ox_widget_new("clock", 1.0);
-    ox_widget_set_update(w, clock_update, NULL);
+      OxWidget *w = ox_widget_new("clock", 1.0);
+      ox_widget_set_update(w, clock_update, NULL);
 
-    OxMain loop = { .on_event = on_event, .on_timeout = on_timeout, .ctx = w };
-    ox_main(&loop);
-    ox_cleanup();
-    return 0;
-}
-```
+      OxMain loop = { .on_event = on_event, .on_timeout = on_timeout, .ctx = w };
+      ox_main(&loop);
+      ox_cleanup();
+      return 0;
+  }
 
 
 [01] Build
 ________________________________________________________________________________
 
-```bash
-make              # builds libox.a only
-make examples     # builds all examples
-make install      # installs libox.a, ox.h, libox.pc
-```
+  make              builds libox.a only
+  make examples     builds all examples
+  make install      installs libox.a, ox.h, libox.pc
 
-Dependencies: libx11, libxft, libxpm, freetype2, fontconfig
-Optional: libasound (for xmobar volume widget)
+  Dependencies:
+    libx11  libxft  libxpm  freetype2  fontconfig
+    Optional: libasound (for xmobar volume widget)
 
 
 [02] Architecture
 ________________________________________________________________________________
 
-ox has three layers:
+  ox has three layers:
 
-```
-  Widget (state)          Window (X11 surface)       Draw (primitives)
-  ─────────────           ────────────────────        ────────────────
-  OxWidget                OxWindow                    ox_draw_rect
-  - name                  - X11 window handle         ox_draw_text
-  - label (text)          - Xft font                  ox_draw_xpm
-  - update callback       - background color          ox_text_width
-  - click callback        - strut (dock reservation)
-  - async cmd (fork/exec) - show/hide
-  - dirty flag
-```
+    Widget (state)         Window (X11 surface)      Draw (primitives)
+    --------------         --------------------       ----------------
+    OxWidget               OxWindow                   ox_draw_rect
+    - name                 - X11 window handle        ox_draw_text
+    - label (text)         - Xft font                 ox_draw_xpm
+    - update callback      - background color         ox_text_width
+    - click callback       - strut (dock reservation)
+    - async cmd (fork)     - show / hide
+    - dirty flag
 
-Event loop:
+  Event loop:
 
-```
-  ox_main()
-  ─────────
-  select() blocks on: X11 fd, IPC fd, widget pipe fds
-       │
-       ├── on_timeout(now)  →  update widgets, check dirty, redraw
-       ├── on_event(ev)     →  handle Expose, ButtonPress, KeyPress
-       └── on_ipc(msg)      →  handle external commands
-```
+    ox_main()
+    ----------
+    select() blocks on: X11 fd, IPC fd, widget pipe fds
+         |
+         +-- on_timeout(now)  ->  update widgets, check dirty, redraw
+         +-- on_event(ev)     ->  handle Expose, ButtonPress, KeyPress
+         +-- on_ipc(msg)      ->  handle external commands
 
-Widget update flow:
+  Widget update flow:
 
-```
-  ox_widget_update(w)
-       │
-       ├── has cmd?  → fork()+exec(), read stdout non-blocking
-       │                (pipe fd exposed for select() monitoring)
-       │
-       └── has callback? → call update(ctx, buf, 256)
-                            compare buf to current label
-                            if different → dirty = 1
-```
+    ox_widget_update(w)
+         |
+         +-- has cmd?    -> fork()+exec(), read stdout non-blocking
+         |                    (pipe fd exposed for select() monitoring)
+         |
+         +-- has callback?  -> call update(ctx, buf, 256)
+                                 compare buf to current label
+                                 if different -> dirty = 1
 
 
-[03] Widget Guide
+[03] API Reference
 ________________________________________________________________________________
 
-Creating a widget:
+  Each entry lists: function -> source file:line
 
-```c
-OxWidget *w = ox_widget_new("name", interval_seconds);
-```
+  Core
+  ----
+  ox_init()                   src/draw.c:88
+  ox_cleanup()                src/draw.c:93
+  ox_main(OxMain*)            src/loop.c:77
+  ox_quit(OxMain*)            src/loop.c:73
+  ox_display()                src/draw.c:85
+  ox_screen()                 src/draw.c:86
 
-Setting update logic — two approaches:
+  Widget
+  ------
+  ox_widget_new()             src/widget.c:97
+  ox_widget_destroy()         src/widget.c:106
+  ox_widget_set_update()      src/widget.c:121
+  ox_widget_set_click()       src/widget.c:126
+  ox_widget_set_icon()        src/widget.c:130
+  ox_widget_set_cmd()         src/widget.c:135
+  ox_widget_set_label_text()  src/widget.c:140
+  ox_widget_set_colors()      src/widget.c:149
+  ox_widget_update()          src/widget.c:251
+  ox_widget_do_click()        src/widget.c:266
+  ox_widget_get_fd()          src/widget.c:197
+  ox_widget_read()            src/widget.c:214
+  ox_widget_get_label()       src/widget.c:270
+  ox_widget_get_icon()        src/widget.c:271
+  ox_widget_get_fg()          src/widget.c:272
+  ox_widget_get_bg()          src/widget.c:273
+  ox_widget_get_interval()    src/widget.c:274
+  ox_widget_get_last_update() src/widget.c:275
+  ox_widget_set_last_update() src/widget.c:276
+  ox_widget_is_dirty()        src/widget.c:277
+  ox_widget_clear_dirty()     src/widget.c:278
 
-A) Callback (for reading /proc, sysfs, time, etc.):
+  Window
+  ------
+  ox_window_new()             src/draw.c:121
+  ox_window_new_floating()    src/draw.c:157
+  ox_window_destroy()         src/draw.c:168
+  ox_window_set_bg()          src/draw.c:179
+  ox_window_set_font()        src/draw.c:184
+  ox_window_set_strut()       src/draw.c:189
+  ox_window_set_wm_class()    src/draw.c:204
+  ox_window_show()            src/draw.c:212
+  ox_window_hide()            src/draw.c:218
+  ox_window_handle()          src/draw.c:224
 
-```c
-static void my_update(void *ctx, char *buf, size_t len) {
-    (void)ctx;
-    FILE *f = fopen("/proc/loadavg", "r");
-    if (!f) { snprintf(buf, len, "??"); return; }
-    float load;
-    fscanf(f, "%f", &load);
-    fclose(f);
-    snprintf(buf, len, "%.1f", load);
-}
+  Draw
+  ----
+  ox_draw_rect()              src/draw.c:234
+  ox_draw_text()              src/draw.c:273
+  ox_draw_xpm()               src/draw.c:301
+  ox_text_width()             src/draw.c:284
 
-OxWidget *w = ox_widget_new("load", 2.0);
-ox_widget_set_update(w, my_update, NULL);
-```
+  IPC
+  ---
+  ox_ipc_init()               src/ipc.c:63
+  ox_ipc_fd()                 src/ipc.c:84
+  ox_ipc_send()               src/ipc.c:88
+  ox_ipc_recv()               src/ipc.c:111
+  ox_ipc_cleanup()            src/ipc.c:138
 
-B) Shell command (for pactl, amixer, etc.):
-
-```c
-OxWidget *w = ox_widget_new("vol", 5.0);
-ox_widget_set_cmd(w, "amixer get Master | awk -F'[][]' '/%/ {print $2}'");
-```
-
-The command runs asynchronously (fork+exec, non-blocking pipe).
-When complete, the first line of stdout becomes the widget label.
-
-Setting click behavior:
-
-```c
-static void on_click(void *ctx) {
-    system("wpctl set-mute @DEFAULT_SINK@ toggle");
-}
-
-ox_widget_set_click(w, on_click);
-```
-
-Per-widget colors:
-
-```c
-ox_widget_set_colors(w, "#ff0000", NULL);  /* red fg, default bg */
-```
-
-Static label (no update callback):
-
-```c
-OxWidget *w = ox_widget_new("power", 0);
-ox_widget_set_label_text(w, "off");
-```
+  Types
+  -----
+  OxMain                      include/ox.h:17
+  OxWidgetUpdate callback     include/ox.h:11
+  OxWidgetClick callback      include/ox.h:12
+  OxEventFn callback          include/ox.h:13
+  OxTimeoutFn callback        include/ox.h:14
+  OxIpcFn callback            include/ox.h:15
 
 
-[04] Multiple Widgets
+[04] Widget Guide
 ________________________________________________________________________________
 
-Bars are arrays of widgets. Each widget updates independently on its own interval.
+  Creating a widget:
 
-```c
-/* bar state */
-typedef struct {
-    OxWindow *win;
-    OxWidget *widgets[16];
-    int count;
-    int height, padding;
-    const char *fg, *bg;
-} Bar;
+    OxWidget *w = ox_widget_new("name", interval_seconds);
 
-static void bar_add(Bar *b, OxWidget *w) {
-    b->widgets[b->count++] = w;
-}
+  Setting update logic — two approaches:
 
-/* render draws all widgets in a row */
-static void bar_render(Bar *b) {
-    int cx = b->padding;
-    int cy = b->height / 2;
-    for (int i = 0; i < b->count; i++) {
-        if (i > 0) {
-            ox_draw_text(b->win, cx, cy, " | ", "#555555");
-            cx += ox_text_width(b->win, " | ") + b->padding;
-        }
-        ox_draw_text(b->win, cx, cy, ox_widget_get_label(b->widgets[i]), b->fg);
-        cx += ox_text_width(b->win, ox_widget_get_label(b->widgets[i])) + b->padding;
+  A) Callback (for reading /proc, sysfs, time, etc.):
+
+    static void my_update(void *ctx, char *buf, size_t len) {
+        (void)ctx;
+        FILE *f = fopen("/proc/loadavg", "r");
+        if (!f) { snprintf(buf, len, "??"); return; }
+        float load;
+        fscanf(f, "%f", &load);
+        fclose(f);
+        snprintf(buf, len, "%.1f", load);
     }
-}
 
-/* timeout updates all widgets, redraws if any changed */
-static void on_timeout(OxMain *m, double now) {
-    Bar *b = m->ctx;
-    int any_dirty = 0;
-    for (int i = 0; i < b->count; i++) {
-        OxWidget *w = b->widgets[i];
-        if (ox_widget_get_interval(w) > 0 &&
-            now - ox_widget_get_last_update(w) >= ox_widget_get_interval(w)) {
-            ox_widget_update(w);
-            ox_widget_set_last_update(w, now);
-        }
-        if (ox_widget_is_dirty(w)) any_dirty = 1;
+    OxWidget *w = ox_widget_new("load", 2.0);
+    ox_widget_set_update(w, my_update, NULL);
+
+  B) Shell command (for pactl, amixer, etc.):
+
+    OxWidget *w = ox_widget_new("vol", 5.0);
+    ox_widget_set_cmd(w, "amixer get Master | awk -F'[][]' '/%/ {print $2}'");
+
+  The command runs asynchronously (fork+exec, non-blocking pipe).
+  When complete, the first line of stdout becomes the widget label.
+
+  Setting click behavior:
+
+    static void on_click(void *ctx) {
+        system("wpctl set-mute @DEFAULT_SINK@ toggle");
     }
-    if (any_dirty) {
-        bar_render(b);
+    ox_widget_set_click(w, on_click);
+
+  Per-widget colors:
+
+    ox_widget_set_colors(w, "#ff0000", NULL);   /* red fg, default bg */
+
+  Static label (no update callback):
+
+    OxWidget *w = ox_widget_new("power", 0);
+    ox_widget_set_label_text(w, "off");
+
+
+[05] Multiple Widgets / Bars
+________________________________________________________________________________
+
+  Bars are arrays of widgets. Each widget updates independently on its own
+  interval. See examples/simple-bar.c for a complete implementation.
+
+  Bar struct pattern:
+
+    typedef struct {
+        OxWindow *win;
+        OxWidget *widgets[16];
+        int count;
+        int height, padding;
+        const char *fg, *bg;
+    } Bar;
+
+    static void bar_add(Bar *b, OxWidget *w) {
+        b->widgets[b->count++] = w;
+    }
+
+  Render draws all widgets in a row:
+
+    static void bar_render(Bar *b) {
+        int cx = b->padding;
+        int cy = b->height / 2;
+        for (int i = 0; i < b->count; i++) {
+            if (i > 0) {
+                ox_draw_text(b->win, cx, cy, " | ", "#555555");
+                cx += ox_text_width(b->win, " | ") + b->padding;
+            }
+            ox_draw_text(b->win, cx, cy,
+                ox_widget_get_label(b->widgets[i]), b->fg);
+            cx += ox_text_width(b->win,
+                ox_widget_get_label(b->widgets[i])) + b->padding;
+        }
+    }
+
+  Timeout updates widgets, redraws only if dirty:
+
+    static void on_timeout(OxMain *m, double now) {
+        Bar *b = m->ctx;
+        int any_dirty = 0;
+        for (int i = 0; i < b->count; i++) {
+            OxWidget *w = b->widgets[i];
+            if (ox_widget_get_interval(w) > 0 &&
+                now - ox_widget_get_last_update(w) >=
+                    ox_widget_get_interval(w)) {
+                ox_widget_update(w);
+                ox_widget_set_last_update(w, now);
+            }
+            if (ox_widget_is_dirty(w)) any_dirty = 1;
+        }
+        if (any_dirty) {
+            bar_render(b);
+            for (int i = 0; i < b->count; i++)
+                ox_widget_clear_dirty(b->widgets[i]);
+        }
+    }
+
+  Multiple bars (left / center / right):
+
+    Bar left   = { .height=28, .padding=8, .fg="#fff", .bg="#000" };
+    Bar center = { .height=28, .padding=8, .fg="#fff", .bg="#000" };
+    Bar right  = { .height=28, .padding=8, .fg="#fff", .bg="#000" };
+
+    left.win   = ox_window_new(0,          0, left_w,   h);
+    center.win = ox_window_new((sw-cw)/2,   0, center_w, h);
+    right.win  = ox_window_new(sw-rw,       0, right_w,  h);
+
+
+[06] Click Handling
+________________________________________________________________________________
+
+  See examples/xmobar.c for a complete implementation with hit-testing.
+
+  The WidgetLayout struct stores bounding boxes computed during render:
+
+    typedef struct { int x, width; } WidgetLayout;
+
+  In your render function, store layout per widget:
+
+    b->layout[i].x = cx;
+    b->layout[i].width = ww;
+
+  In on_event, use bar_hit_test to find which widget was clicked:
+
+    static int bar_hit_test(Bar *b, int x) {
         for (int i = 0; i < b->count; i++)
-            ox_widget_clear_dirty(b->widgets[i]);
+            if (x >= b->layout[i].x &&
+                x < b->layout[i].x + b->layout[i].width)
+                return i;
+        return -1;
     }
-}
-```
 
-Multiple bars (left/center/right):
-
-```c
-Bar left   = { .height = 28, .padding = 8, .fg = "#ffffff", .bg = "#000000" };
-Bar center = { .height = 28, .padding = 8, .fg = "#ffffff", .bg = "#000000" };
-Bar right  = { .height = 28, .padding = 8, .fg = "#ffffff", .bg = "#000000" };
-
-/* create windows at different positions */
-left.win   = ox_window_new(0, 0, left_w, h);
-center.win = ox_window_new((sw - center_w) / 2, 0, center_w, h);
-right.win  = ox_window_new(sw - right_w, 0, right_w, h);
-```
-
-Click handling per bar:
-
-```c
-static void on_event(OxMain *m, XEvent *ev) {
-    Bar *b = m->ctx;
-    if (ev->type == ButtonPress) {
-        if (ev->xbutton.window == ox_window_handle(b->win)) {
-            int cx = b->padding;
-            for (int i = 0; i < b->count; i++) {
-                int ww = ox_text_width(b->win, ox_widget_get_label(b->widgets[i])) + b->padding;
-                if (ev->xbutton.x >= cx && ev->xbutton.x < cx + ww) {
-                    ox_widget_do_click(b->widgets[i]);
-                    break;
-                }
-                cx += ww;
+    static void on_event(OxMain *m, XEvent *ev) {
+        Bar *b = m->ctx;
+        if (ev->type == ButtonPress) {
+            if (ev->xbutton.window == ox_window_handle(b->win)) {
+                int idx = bar_hit_test(b, ev->xbutton.x);
+                if (idx >= 0) ox_widget_do_click(b->widgets[idx]);
             }
         }
     }
-}
-```
 
 
-[05] IPC
+[07] IPC
 ________________________________________________________________________________
 
-Send commands to a running ox bar from scripts:
+  IPC lets external scripts send commands to a running ox bar.
+  See src/ipc.c for the implementation.
 
-```bash
-# start the bar
-./xmobar &
+  Socket path: $XDG_RUNTIME_DIR/ox-ipc-<pid>.sock
 
-# send a command (from i3 config, keybind, etc.)
-echo "update-vol" | socat - UNIX-CONNECT:path=/run/user/1000/ox-ipc-12345.sock
-```
+  Send a command from a script:
 
-In the bar, handle IPC messages:
+    ./xmobar &
+    SOCK="/run/user/$(id -u)/ox-ipc-$(pgrep xmobar).sock"
+    echo "update-vol" | socat - UNIX-CONNECT:"path=$SOCK"
 
-```c
-static void on_ipc(OxMain *m, const char *msg) {
-    if (strcmp(msg, "update-vol") == 0) {
-        ox_widget_update(w_vol);
-        /* redraw will happen automatically if dirty */
+  Handle commands in the bar:
+
+    static void on_ipc(OxMain *m, const char *msg) {
+        if (strcmp(msg, "update-vol") == 0) {
+            ox_widget_update(w_vol);
+            /* redraw happens automatically if dirty */
+        }
     }
-}
 
-/* in main: */
-ox_ipc_init();
-OxMain loop = {
-    .on_ipc = on_ipc,
-    .ipc_fd = ox_ipc_fd(),
-    /* ... */
-};
-```
+    /* in main: */
+    ox_ipc_init();
+    OxMain loop = {
+        .on_ipc = on_ipc,
+        .ipc_fd = ox_ipc_fd(),
+    };
 
 
-[06] Code Style
+[08] Code Style
 ________________________________________________________________________________
 
-Formatting:
+  Formatting:
+    - 4-space indentation (no tabs)
+    - Opening brace on same line for functions and control flow
+    - Single blank line between functions
+    - No trailing whitespace
 
-- 4-space indentation (no tabs)
-- Opening brace on same line for functions and control flow
-- Single blank line between functions
-- No trailing whitespace
+  Naming:
+    - ox_ prefix for all public API functions
+    - snake_case for functions and variables
+    - UPPER_CASE for #define constants
+    - OxPascalCase for types (OxWidget, OxWindow, OxMain)
+    - g_ prefix for file-scope globals (g_dpy, g_screen)
 
-Naming:
+  Callbacks:
+    - Always check for NULL before invoking
+    - Pass user context as first parameter
+    - Return type void for all callbacks
 
-- ox_ prefix for all public API functions
-- snake_case for functions and variables
-- UPPER_CASE for #define constants
-- OxPascalCase for types (OxWidget, OxWindow, OxMain)
-- g_ prefix for file-scope globals (g_dpy, g_screen)
+  Memory:
+    - strdup() for owned strings, free() in destroy functions
+    - calloc() for struct allocation
+    - No hidden allocations in draw functions
 
-Callbacks:
+  Error handling:
+    - Return NULL or -1 on failure (no exceptions)
+    - Log to stderr for critical errors (perror, fprintf)
+    - Graceful degradation (show "??%" instead of crashing)
 
-- Always check for NULL before invoking
-- Pass user context as first parameter
-- Return type void for all callbacks
-
-Memory:
-
-- strdup() for owned strings, free() in destroy functions
-- calloc() for struct allocation
-- No hidden allocations in draw functions
-
-Error handling:
-
-- Return NULL or -1 on failure (no exceptions)
-- Log to stderr for critical errors (perror, fprintf)
-- Graceful degradation (show "??%" instead of crashing)
-
-Headers:
-
-- _POSIX_C_SOURCE 200809L for getline, etc.
-- _GNU_SOURCE for strcasestr (search example only)
-- Include ox.h last among local headers
+  Headers:
+    - _POSIX_C_SOURCE 200809L for getline, clock_gettime, etc.
+    - _GNU_SOURCE for strcasestr (search example only)
+    - Include ox.h last among local headers
 
 
-[07] Extending
+[09] Extending
 ________________________________________________________________________________
 
-Adding a new widget type:
+  Adding a new widget type:
 
-1. Write an update callback:
+    1. Write an update callback:
 
-```c
-static void net_update(void *ctx, char *buf, size_t len) {
-    FILE *f = fopen("/proc/net/dev", "r");
-    if (!f) { snprintf(buf, len, "??"); return; }
-    /* parse and format */
-    fclose(f);
-}
-```
+      static void net_update(void *ctx, char *buf, size_t len) {
+          FILE *f = fopen("/proc/net/dev", "r");
+          if (!f) { snprintf(buf, len, "??"); return; }
+          /* parse and format */
+          fclose(f);
+      }
 
-2. Create and configure:
+    2. Create and configure:
 
-```c
-OxWidget *w = ox_widget_new("net", 3.0);
-ox_widget_set_update(w, net_update, NULL);
-ox_widget_set_colors(w, "#00ff00", NULL);
-```
+      OxWidget *w = ox_widget_new("net", 3.0);
+      ox_widget_set_update(w, net_update, NULL);
+      ox_widget_set_colors(w, "#00ff00", NULL);
 
-3. Add to your bar:
+    3. Add to your bar:
 
-```c
-bar_add(&right, w);
-```
+      bar_add(&right, w);
 
-That's it. The event loop handles timing, dirty tracking, and rendering.
+  The event loop handles timing, dirty tracking, and rendering.
 
-Adding a new draw primitive:
+  Adding a draw primitive:
 
-Keep it in draw.c. Follow the pattern:
+    Keep it in src/draw.c. Follow the pattern:
 
-```c
-void ox_draw_foo(OxWindow *win, int x, int y, /* params */) {
-    /* use win->dpy, win->gc, win->draw for X11 operations */
-}
-```
+      void ox_draw_foo(OxWindow *win, int x, int y /* params */) {
+          /* use win->dpy, win->gc, win->draw for X11 operations */
+      }
 
-Add the declaration to ox.h under the Draw section.
+    Add the declaration to include/ox.h under the Draw section.
 
-Adding a new event type:
+  Adding an event type:
 
-Add a callback field to OxMain, wire it in ox_main()'s select() loop,
-and expose it via the API.
+    Add a callback field to OxMain (include/ox.h:17),
+    wire it in ox_main()'s select() loop (src/loop.c:77),
+    and expose via the API.
 
 
-[08] Examples
+[10] Examples
 ________________________________________________________________________________
 
-| Example       | Description                           |
-|---------------|---------------------------------------|
-| simple-bar    | Full-width bar: time, cpu, mem        |
-| multi-bar     | Three bars: left/center/right panels  |
-| vertical-bar  | Vertical sidebar with stacked widgets |
-| osd           | On-screen display (volume/brightness) |
-| xmobar        | Full status bar with ALSA, battery, clock |
-| search        | Fuzzy search launcher (dmenu-like)    |
+  example        description
+  -------        -----------
+  simple-bar     full-width bar: time, cpu, mem
+  multi-bar      three bars: left/center/right panels
+  vertical-bar   vertical sidebar with stacked widgets
+  osd            on-screen display (volume, brightness)
+  xmobar         full status bar: ALSA vol, battery, clock, workspaces
+  search         fuzzy search launcher (dmenu-like)
+
+  Source: examples/*.c
 
 
-[09] Signals
+[11] Signals
 ________________________________________________________________________________
 
-| Signal  | Action                        |
-|---------|-------------------------------|
-| SIGINT  | Exit event loop cleanly       |
-| SIGTERM | Exit event loop cleanly       |
-| SIGCHLD | Ignored (child auto-reap)     |
+  signal    action
+  ------    ------
+  SIGINT    exit event loop cleanly
+  SIGTERM   exit event loop cleanly
+  SIGCHLD   ignored (child processes auto-reap)
 
 
-[10] License
+[12] License
 ________________________________________________________________________________
 
-MIT
+  MIT
