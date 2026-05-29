@@ -10,11 +10,11 @@ CFLAGS += $(shell pkg-config --cflags x11 xft xpm freetype2 fontconfig)
 PREFIX ?= /usr
 BINDIR ?= $(PREFIX)/bin
 
-SRC = src/widget.c src/draw.c src/loop.c
+SRC = src/widget.c src/draw.c src/loop.c src/ipc.c
 OBJ = $(SRC:src/%.c=build/%.o)
 DEP = $(OBJ:.o=.d)
 
-EXAMPLES = simple-bar multi-bar vertical-bar osd xmobar
+EXAMPLES = simple-bar multi-bar vertical-bar osd xmobar search
 
 all: $(EXAMPLES)
 
@@ -34,6 +34,9 @@ osd: examples/osd.c libox.a
 	$(CC) $(CFLAGS) -o $@ $< -L. -lox $(LDFLAGS) -lm
 
 xmobar: examples/xmobar.c libox.a
+	$(CC) $(CFLAGS) -o $@ $< -L. -lox $(LDFLAGS) -lm
+
+search: examples/search.c libox.a
 	$(CC) $(CFLAGS) -o $@ $< -L. -lox $(LDFLAGS) -lm
 
 build/%.o: src/%.c
