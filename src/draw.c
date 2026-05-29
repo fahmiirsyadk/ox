@@ -19,6 +19,9 @@ struct OxWindow {
     int x, y;
     char *bg;
     OxWindowClick on_click;
+    OxRenderFn on_render;
+    void *render_ctx;
+    int dirty;
 };
 
 static Display *g_dpy;
@@ -66,7 +69,7 @@ OxWindow *ox_window_new(int x, int y, int w, int h) {
         XInternAtom(g_dpy, "_NET_WM_WINDOW_TYPE", False),
         XA_ATOM, 32, PropModeReplace, (unsigned char *)&type, 1);
 
-    XSelectInput(g_dpy, win->win, ButtonPressMask);
+    XSelectInput(g_dpy, win->win, ButtonPressMask | ExposureMask);
     return win;
 }
 
@@ -83,20 +86,29 @@ void ox_window_destroy(OxWindow *win) {
 void ox_window_set_bg(OxWindow *win, const char *color) {
     free(win->bg);
     win->bg = strdup(color);
+    win->dirty = 1;
 }
 
 void ox_window_set_font(OxWindow *win, const char *font) {
     XftFontClose(win->dpy, win->font);
     win->font = XftFontOpenName(win->dpy, win->screen, font);
+    win->dirty = 1;
 }
 
 void ox_window_set_click(OxWindow *win, OxWindowClick click) {
     win->on_click = click;
 }
 
+void ox_window_set_render(OxWindow *win, OxRenderFn fn, void *ctx) {
+    win->on_render = fn;
+    win->render_ctx = ctx;
+    win->dirty = 1;
+}
+
 void ox_window_show(OxWindow *win) {
     XMapWindow(win->dpy, win->win);
     XSync(win->dpy, False);
+    win->dirty = 1;
 }
 
 void ox_window_hide(OxWindow *win) {
@@ -112,6 +124,7 @@ void ox_window_move(OxWindow *win, int x, int y) {
 void ox_window_resize(OxWindow *win, int w, int h) {
     win->width = w; win->height = h;
     XResizeWindow(win->dpy, win->win, w, h);
+    win->dirty = 1;
 }
 
 void ox_window_set_strut(OxWindow *win, int top, int bottom, int left, int right) {

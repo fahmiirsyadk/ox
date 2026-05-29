@@ -5,44 +5,6 @@
 #include <time.h>
 #include "ox.h"
 
-typedef struct {
-    OxWindow *win;
-    OxWidget *widgets[16];
-    int count;
-    int height;
-    int padding;
-    const char *fg;
-    const char *bg;
-    const char *sep;
-} Bar;
-
-static void bar_add(Bar *bar, OxWidget *w) {
-    bar->widgets[bar->count++] = w;
-}
-
-static void bar_render(Bar *bar) {
-    int sw = DisplayWidth(ox_display(), ox_screen());
-    int cx = bar->padding;
-    int cy = bar->height / 2 + ox_text_width(bar->win, "X") / 3;
-
-    ox_draw_rect(bar->win, 0, 0, sw, bar->height, bar->bg);
-
-    for (int i = 0; i < bar->count; i++) {
-        if (i > 0) {
-            ox_draw_text(bar->win, cx, cy, " | ", bar->sep);
-            cx += ox_text_width(bar->win, " | ") + bar->padding;
-        }
-        const char *icon = ox_widget_get_icon(bar->widgets[i]);
-        const char *label = ox_widget_get_label(bar->widgets[i]);
-        if (icon) {
-            ox_draw_text(bar->win, cx, cy, icon, bar->fg);
-            cx += ox_text_width(bar->win, icon);
-        }
-        ox_draw_text(bar->win, cx, cy, label, bar->fg);
-        cx += ox_text_width(bar->win, label) + bar->padding;
-    }
-}
-
 static void time_update(void *ctx, char *buf, size_t len) {
     (void)ctx;
     time_t t = time(NULL);
@@ -85,6 +47,43 @@ static void mem_update(void *ctx, char *buf, size_t len) {
     snprintf(buf, len, "%ldMB", used);
 }
 
+typedef struct {
+    OxWindow *win;
+    OxWidget *widgets[16];
+    int count;
+    int height;
+    int padding;
+    const char *fg;
+    const char *bg;
+    const char *sep;
+} Bar;
+
+static void bar_add(Bar *b, OxWidget *w) { b->widgets[b->count++] = w; }
+
+static void bar_render(OxWindow *win, void *ctx) {
+    Bar *b = ctx;
+    int sw = DisplayWidth(ox_display(), ox_screen());
+    int cx = b->padding;
+    int cy = b->height / 2 + ox_text_width(b->win, "X") / 3;
+
+    ox_draw_rect(b->win, 0, 0, sw, b->height, b->bg);
+
+    for (int i = 0; i < b->count; i++) {
+        if (i > 0) {
+            ox_draw_text(b->win, cx, cy, " | ", b->sep);
+            cx += ox_text_width(b->win, " | ") + b->padding;
+        }
+        const char *icon = ox_widget_get_icon(b->widgets[i]);
+        const char *label = ox_widget_get_label(b->widgets[i]);
+        if (icon) {
+            ox_draw_text(b->win, cx, cy, icon, b->fg);
+            cx += ox_text_width(b->win, icon);
+        }
+        ox_draw_text(b->win, cx, cy, label, b->fg);
+        cx += ox_text_width(b->win, label) + b->padding;
+    }
+}
+
 int main(void) {
     ox_init();
 
@@ -98,7 +97,7 @@ int main(void) {
     bar.win = ox_window_new(0, 0, sw, bar.height);
     ox_window_set_bg(bar.win, bar.bg);
     ox_window_set_font(bar.win, "monospace:size=11");
-    ox_window_set_strut(bar.win, bar.height, 0, 0, 0);
+    ox_window_set_render(bar.win, bar_render, &bar);
     ox_window_show(bar.win);
 
     OxWidget *w_time = ox_widget_new("time", 1.0);
@@ -124,6 +123,7 @@ int main(void) {
         clock_gettime(CLOCK_MONOTONIC, &now_ts);
         double cur = now_ts.tv_sec + now_ts.tv_nsec / 1e9;
 
+        int any_dirty = 0;
         for (int i = 0; i < bar.count; i++) {
             OxWidget *w = bar.widgets[i];
             if (ox_widget_get_interval(w) > 0 &&
@@ -131,15 +131,22 @@ int main(void) {
                 ox_widget_update(w);
                 ox_widget_set_last_update(w, cur);
             }
+            if (ox_widget_is_dirty(w)) any_dirty = 1;
         }
 
-        bar_render(&bar);
+        if (any_dirty) {
+            bar_render(bar.win, &bar);
+            for (int i = 0; i < bar.count; i++)
+                ox_widget_clear_dirty(bar.widgets[i]);
+        }
 
         Display *dpy = ox_display();
         while (XPending(dpy) > 0) {
             XEvent ev;
             XNextEvent(dpy, &ev);
+            if (ev.type == Expose) bar_render(bar.win, &bar);
         }
+
         XFlush(dpy);
         nanosleep(&ts, NULL);
     }
