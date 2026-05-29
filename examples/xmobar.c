@@ -1,12 +1,16 @@
+#define _GNU_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <signal.h>
 #include <unistd.h>
+#include <dirent.h>
+#include <fcntl.h>
+#include <sys/types.h>
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
+#include <alsa/asoundlib.h>
 #include "ox.h"
 
 #define C_FG    "#F47193"
@@ -14,34 +18,108 @@
 #define C_SEP   "#666666"
 #define C_ACC   "#FFB86C"
 #define C_DIM   "#b3afc2"
-#define C_RED   "#FF0000"
 #define NWSP    5
 #define ICON_SZ 20
 
 typedef struct {
+    int x, width;
+} WidgetLayout;
+
+typedef struct {
     OxWindow *win;
     OxWidget *widgets[16];
+    WidgetLayout layout[16];
     int count;
     int height, padding, width;
     const char *fg, *bg, *sep;
 } Bar;
 
-static void bar_add(Bar *b, OxWidget *w) { b->widgets[b->count++] = w; }
+typedef struct {
+    Bar left, center, right;
+    int current_desktop;
+    int needs_redraw;
+    double last_wsp_check;
+    char exe_dir[PATH_MAX];
+    char bat_path[PATH_MAX];
+} XMBState;
+
+static void run_cmd(const char *cmd) {
+    pid_t pid = fork();
+    if (pid == 0) {
+        setsid();
+        int devnull = open("/dev/null", O_WRONLY);
+        if (devnull >= 0) {
+            dup2(devnull, STDOUT_FILENO);
+            dup2(devnull, STDERR_FILENO);
+            close(devnull);
+        }
+        execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
+        _exit(1);
+    }
+}
+
+static void resolve_exe_dir(XMBState *s) {
+    ssize_t n = readlink("/proc/self/exe", s->exe_dir, sizeof(s->exe_dir) - 1);
+    if (n > 0) {
+        s->exe_dir[n] = '\0';
+        char *slash = strrchr(s->exe_dir, '/');
+        if (slash) *slash = '\0';
+    }
+}
+
+static const char *xpm_path(XMBState *s, const char *name) {
+    static char buf[PATH_MAX];
+    snprintf(buf, sizeof(buf), "%s/examples/xmobar/%s", s->exe_dir, name);
+    return buf;
+}
+
+static void detect_battery(XMBState *s) {
+    DIR *d = opendir("/sys/class/power_supply");
+    if (!d) return;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        if (e->d_name[0] == '.') continue;
+        char path[PATH_MAX];
+        snprintf(path, sizeof(path), "/sys/class/power_supply/%s/type", e->d_name);
+        FILE *f = fopen(path, "r");
+        if (!f) continue;
+        char type[32] = "";
+        if (fgets(type, sizeof(type), f)) {
+            size_t n = strlen(type);
+            while (n > 0 && (type[n-1] == '\n' || type[n-1] == '\r')) type[--n] = '\0';
+        }
+        fclose(f);
+        if (strcmp(type, "Battery") == 0) {
+            snprintf(s->bat_path, sizeof(s->bat_path),
+                     "/sys/class/power_supply/%s", e->d_name);
+            break;
+        }
+    }
+    closedir(d);
+}
 
 static int get_current_desktop(void) {
     Display *dpy = ox_display();
-    Atom actual; int format;
+    Atom actual_type;
+    int actual_format;
     unsigned long nitems, bytes_after;
     unsigned char *prop = NULL;
-    Atom a = XInternAtom(dpy, "_NET_CURRENT_DESKTOP", True);
-    if (a == None) return 0;
-    if (XGetWindowProperty(dpy, RootWindow(dpy, ox_screen()), a,
-            0, 1, False, XA_CARDINAL, &actual, &format, &nitems, &bytes_after,
-            &prop) == Success && prop) {
-        int d = *(unsigned long *)prop; XFree(prop); return d;
+    Atom atom = XInternAtom(dpy, "_NET_CURRENT_DESKTOP", True);
+    if (atom == None) return 0;
+    if (XGetWindowProperty(dpy, RootWindow(dpy, ox_screen()), atom,
+            0, 1, False, XA_CARDINAL, &actual_type, &actual_format,
+            &nitems, &bytes_after, &prop) == Success && prop != NULL) {
+        int desktop = 0;
+        if (actual_format == 32 && nitems > 0)
+            desktop = (int)(*(long *)prop);
+        XFree(prop);
+        return desktop;
     }
+    if (prop) XFree(prop);
     return 0;
 }
+
+static void bar_add(Bar *b, OxWidget *w) { b->widgets[b->count++] = w; }
 
 static void wsp_update(void *ctx, char *buf, size_t len) {
     snprintf(buf, len, "%d", (int)(long)ctx + 1);
@@ -49,285 +127,302 @@ static void wsp_update(void *ctx, char *buf, size_t len) {
 
 static void vol_update(void *ctx, char *buf, size_t len) {
     (void)ctx;
-    FILE *f = popen("pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | grep -oP '\\d+%' | head -1 | grep -oP '\\d+'", "r");
-    if (!f) { snprintf(buf, len, "??%%"); return; }
-    if (fgets(buf, len, f)) {
-        size_t n = strlen(buf);
-        while (n > 0 && (buf[n-1] == '\n' || buf[n-1] == '\r')) buf[--n] = '\0';
-    } else snprintf(buf, len, "??%%");
-    pclose(f);
+    snd_mixer_t *handle;
+    snd_mixer_selem_id_t *sid;
+    if (snd_mixer_open(&handle, 0) < 0) { snprintf(buf, len, "??%%"); return; }
+    snd_mixer_attach(handle, "default");
+    snd_mixer_selem_register(handle, NULL, NULL);
+    snd_mixer_load(handle);
+    snd_mixer_selem_id_alloca(&sid);
+    snd_mixer_selem_id_set_index(sid, 0);
+    snd_mixer_selem_id_set_name(sid, "Master");
+    snd_mixer_elem_t *elem = snd_mixer_find_selem(handle, sid);
+    if (!elem) { snd_mixer_close(handle); snprintf(buf, len, "??%%"); return; }
+    long min, max, val;
+    snd_mixer_selem_get_playback_volume_range(elem, &min, &max);
+    snd_mixer_selem_get_playback_volume(elem, 0, &val);
+    int pct = (int)((val - min) * 100 / (max - min));
+    snd_mixer_close(handle);
+    snprintf(buf, len, "%d%%", pct);
 }
 
 static void bat_update(void *ctx, char *buf, size_t len) {
-    (void)ctx;
-    FILE *f = fopen("/sys/class/power_supply/BAT0/capacity", "r");
+    XMBState *s = ctx;
+    if (s->bat_path[0] == '\0') { snprintf(buf, len, "AC"); return; }
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/capacity", s->bat_path);
+    FILE *f = fopen(path, "r");
     if (!f) { snprintf(buf, len, "AC"); return; }
-    int pct = 0; fscanf(f, "%d", &pct); fclose(f);
-    FILE *f2 = fopen("/sys/class/power_supply/BAT0/status", "r");
-    char s[32] = "";
-    if (f2) { fgets(s, sizeof(s), f2); fclose(f2); }
-    size_t n = strlen(s);
-    while (n > 0 && (s[n-1] == '\n' || s[n-1] == '\r')) s[--n] = '\0';
-    if (strcmp(s, "Charging") == 0) snprintf(buf, len, "%d%%+", pct);
-    else if (strcmp(s, "Full") == 0) snprintf(buf, len, "Full");
+    int pct = 0;
+    fscanf(f, "%d", &pct);
+    fclose(f);
+    snprintf(path, sizeof(path), "%s/status", s->bat_path);
+    FILE *f2 = fopen(path, "r");
+    char st[32] = "";
+    if (f2) { fgets(st, sizeof(st), f2); fclose(f2); }
+    size_t n = strlen(st);
+    while (n > 0 && (st[n-1] == '\n' || st[n-1] == '\r')) st[--n] = '\0';
+    if (strcmp(st, "Charging") == 0) snprintf(buf, len, "%d%%+", pct);
+    else if (strcmp(st, "Full") == 0) snprintf(buf, len, "Full");
     else snprintf(buf, len, "%d%%", pct);
 }
 
-static volatile int show_power = 0;
-static void power_click(void *ctx) { (void)ctx; show_power = 1; }
-static void power_shutdown(void *ctx) { (void)ctx; system("shutdown -h now"); }
-static void power_reboot(void *ctx) { (void)ctx; system("reboot"); }
-static void power_exit(void *ctx) { (void)ctx; kill(getppid(), SIGTERM); }
-static void wsp_click(void *ctx) {
-    char cmd[32]; snprintf(cmd, sizeof(cmd), "xdotool key super+%d", (int)(long)ctx + 1);
-    system(cmd);
+static void clock_update(void *ctx, char *buf, size_t len) {
+    (void)ctx;
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    strftime(buf, len, "%H:%M", t);
 }
 
+static void wsp_click_0(void *ctx) { XMBState *s = ctx; s->current_desktop = 0; s->needs_redraw = 1; run_cmd("xdotool key super+1"); }
+static void wsp_click_1(void *ctx) { XMBState *s = ctx; s->current_desktop = 1; s->needs_redraw = 1; run_cmd("xdotool key super+2"); }
+static void wsp_click_2(void *ctx) { XMBState *s = ctx; s->current_desktop = 2; s->needs_redraw = 1; run_cmd("xdotool key super+3"); }
+static void wsp_click_3(void *ctx) { XMBState *s = ctx; s->current_desktop = 3; s->needs_redraw = 1; run_cmd("xdotool key super+4"); }
+static void wsp_click_4(void *ctx) { XMBState *s = ctx; s->current_desktop = 4; s->needs_redraw = 1; run_cmd("xdotool key super+5"); }
+
+static OxWidgetClick wsp_click_fns[NWSP] = {
+    wsp_click_0, wsp_click_1, wsp_click_2, wsp_click_3, wsp_click_4
+};
+
 static void render_left(OxWindow *win, void *ctx) {
-    Bar *b = ctx;
-    ox_draw_rect(win, 0, 0, b->width, b->height, b->bg);
-    ox_draw_xpm(win, b->padding, (b->height - 42) / 2, "examples/xmobar/nix-22.xpm");
+    XMBState *s = ctx;
+    ox_draw_rect(win, 0, 0, s->left.width, s->left.height, s->left.bg);
+    ox_draw_xpm(win, s->left.padding, (s->left.height - 42) / 2, xpm_path(s, "nix-22.xpm"));
 }
 
 static void render_center(OxWindow *win, void *ctx) {
-    Bar *b = ctx;
+    XMBState *s = ctx;
+    Bar *b = &s->center;
     int cy = b->height / 2 + ox_text_width(win, "X") / 3;
     ox_draw_rect(win, 0, 0, b->width, b->height, b->bg);
     int cx = b->padding;
-    int cur_d = get_current_desktop();
     for (int i = 0; i < b->count; i++) {
         const char *label = ox_widget_get_label(b->widgets[i]);
-        const char *color = (i == cur_d) ? C_FG : C_DIM;
+        int ww = ox_text_width(win, label) + b->padding;
+        b->layout[i].x = cx;
+        b->layout[i].width = ww;
+        const char *color = (i == s->current_desktop) ? C_FG : C_DIM;
         ox_draw_text(win, cx, cy, label, color);
-        cx += ox_text_width(win, label) + b->padding;
+        cx += ww;
     }
-    (void)b;
 }
 
 static void render_right(OxWindow *win, void *ctx) {
-    Bar *b = ctx;
+    XMBState *s = ctx;
+    Bar *b = &s->right;
     int cy = b->height / 2 + ox_text_width(win, "X") / 3;
     ox_draw_rect(win, 0, 0, b->width, b->height, b->bg);
     int cx = b->padding;
-    const char *icons[] = { "examples/xmobar/cpu_20.xpm",
-                             "examples/xmobar/harddisk-icon_20.xpm",
-                             "examples/xmobar/net_up_20.xpm" };
+    static const char *icons[] = { "cpu_20.xpm", "harddisk-icon_20.xpm", "net_up_20.xpm" };
     for (int i = 0; i < b->count; i++) {
+        int ww = 0;
         if (i > 0) {
             ox_draw_text(win, cx, cy, "|", b->sep);
-            cx += ox_text_width(win, "|") + b->padding;
+            ww += ox_text_width(win, "|") + b->padding;
         }
-        ox_draw_xpm(win, cx, (b->height - ICON_SZ) / 2, icons[i]);
-        cx += ICON_SZ + b->padding;
+        if (i < 3) ox_draw_xpm(win, cx, (b->height - ICON_SZ) / 2, xpm_path(s, icons[i]));
+        ww += ICON_SZ + b->padding;
         const char *label = ox_widget_get_label(b->widgets[i]);
         const char *color = ox_widget_get_fg(b->widgets[i]);
         if (!color) color = b->fg;
-        ox_draw_text(win, cx, cy, label, color);
-        cx += ox_text_width(win, label) + b->padding;
+        ox_draw_text(win, cx + ICON_SZ + b->padding, cy, label, color);
+        ww += ox_text_width(win, label) + b->padding;
+        b->layout[i].x = cx;
+        b->layout[i].width = ww;
+        cx += ww;
     }
-    (void)b;
+}
+
+static int bar_hit_test(Bar *b, int x) {
+    for (int i = 0; i < b->count; i++)
+        if (x >= b->layout[i].x && x < b->layout[i].x + b->layout[i].width)
+            return i;
+    return -1;
+}
+
+static void on_timeout(OxMain *m, double now) {
+    XMBState *s = m->ctx;
+
+    /* slow poll: sync workspace from keyboard */
+    if (now - s->last_wsp_check > 1.0) {
+        s->last_wsp_check = now;
+        int cd = get_current_desktop();
+        if (cd != s->current_desktop) {
+            s->current_desktop = cd;
+            s->needs_redraw = 1;
+        }
+    }
+
+    /* update right widgets */
+    for (int i = 0; i < s->right.count; i++) {
+        OxWidget *w = s->right.widgets[i];
+        if (ox_widget_get_interval(w) > 0 &&
+            now - ox_widget_get_last_update(w) >= ox_widget_get_interval(w)) {
+            ox_widget_update(w);
+            ox_widget_set_last_update(w, now);
+        }
+        /* check if async cmd produced output */
+        int fd = ox_widget_get_fd(w);
+        if (fd >= 0) {
+            /* add to extra_fds so select() monitors it */
+            int found = 0;
+            for (int j = 0; j < m->extra_fd_count; j++)
+                if (m->extra_fds[j] == fd) { found = 1; break; }
+            if (!found && m->extra_fd_count < 8)
+                m->extra_fds[m->extra_fd_count++] = fd;
+        }
+    }
+
+    /* redraw if dirty */
+    int any_dirty = s->needs_redraw;
+    s->needs_redraw = 0;
+    for (int i = 0; i < s->right.count; i++)
+        if (ox_widget_is_dirty(s->right.widgets[i])) any_dirty = 1;
+    /* also check if any widget's async fd is ready */
+    for (int i = 0; i < s->right.count; i++) {
+        OxWidget *w = s->right.widgets[i];
+        int fd = ox_widget_get_fd(w);
+        if (fd >= 0) {
+            /* try non-blocking read */
+            fd_set test;
+            FD_ZERO(&test);
+            FD_SET(fd, &test);
+            struct timeval tv = {0, 0};
+            if (select(fd + 1, &test, NULL, NULL, &tv) > 0) {
+                ox_widget_read(w);
+                if (ox_widget_is_dirty(w)) any_dirty = 1;
+            }
+        }
+    }
+
+    if (any_dirty) {
+        render_center(s->center.win, s);
+        render_right(s->right.win, s);
+        for (int i = 0; i < s->center.count; i++) ox_widget_clear_dirty(s->center.widgets[i]);
+        for (int i = 0; i < s->right.count; i++) ox_widget_clear_dirty(s->right.widgets[i]);
+    }
+}
+
+static void on_event(OxMain *m, XEvent *ev) {
+    XMBState *s = m->ctx;
+    if (ev->type == Expose) {
+        render_left(s->left.win, s);
+        render_center(s->center.win, s);
+        render_right(s->right.win, s);
+    }
+    if (ev->type == ButtonPress) {
+        if (ev->xbutton.window == ox_window_handle(s->center.win)) {
+            int idx = bar_hit_test(&s->center, ev->xbutton.x);
+            if (idx >= 0) ox_widget_do_click(s->center.widgets[idx]);
+        }
+        if (ev->xbutton.window == ox_window_handle(s->right.win)) {
+            int idx = bar_hit_test(&s->right, ev->xbutton.x);
+            if (idx >= 0) ox_widget_do_click(s->right.widgets[idx]);
+        }
+    }
 }
 
 int main(void) {
+    XMBState state = {0};
+    XMBState *s = &state;
+
+    resolve_exe_dir(s);
+    detect_battery(s);
     ox_init();
-    int sw = DisplayWidth(ox_display(), ox_screen());
+
+    Display *dpy = ox_display();
+    int screen = ox_screen();
+    int sw = DisplayWidth(dpy, screen);
     int h = 28, pad = 8;
     const char *font = "monospace:size=11";
 
     /* ── left: nix icon ── */
-    int icon_w = 46;
-    Bar left = { .height = h, .padding = pad, .fg = C_FG, .bg = C_BG, .sep = C_SEP,
-                 .width = icon_w + pad * 2 };
+    s->left = (Bar){ .height = h, .padding = pad, .fg = C_FG, .bg = C_BG, .sep = C_SEP,
+                     .width = 46 + pad * 2 };
 
-    /* ── center: workspaces 1-5 ── */
-    Bar center = { .height = h, .padding = pad, .fg = C_DIM, .bg = C_BG, .sep = C_SEP };
-    OxWidget *wsp[NWSP];
+    /* ── center: workspaces ── */
+    s->center = (Bar){ .height = h, .padding = pad, .fg = C_DIM, .bg = C_BG, .sep = C_SEP };
     for (int i = 0; i < NWSP; i++) {
-        wsp[i] = ox_widget_new("wsp", 0.2);
-        ox_widget_set_update(wsp[i], wsp_update, (void *)(long)i);
-        ox_widget_set_click(wsp[i], wsp_click);
-        bar_add(&center, wsp[i]);
+        OxWidget *w = ox_widget_new("wsp", 0.2);
+        ox_widget_set_update(w, wsp_update, (void *)(long)i);
+        ox_widget_set_click(w, wsp_click_fns[i]);
+        bar_add(&s->center, w);
     }
 
-    /* ── right: vol + bat + power ── */
-    Bar right = { .height = h, .padding = pad, .fg = C_DIM, .bg = C_BG, .sep = C_SEP };
+    /* ── right: vol + bat + clock ── */
+    s->right = (Bar){ .height = h, .padding = pad, .fg = C_DIM, .bg = C_BG, .sep = C_SEP };
     OxWidget *w_vol = ox_widget_new("vol", 5.0);
     ox_widget_set_colors(w_vol, C_ACC, NULL);
     ox_widget_set_update(w_vol, vol_update, NULL);
-    bar_add(&right, w_vol);
+    bar_add(&s->right, w_vol);
 
     OxWidget *w_bat = ox_widget_new("bat", 50.0);
-    ox_widget_set_update(w_bat, bat_update, NULL);
-    bar_add(&right, w_bat);
+    ox_widget_set_update(w_bat, bat_update, s);
+    bar_add(&s->right, w_bat);
 
-    OxWidget *w_power = ox_widget_new("power", 0);
-    ox_widget_set_colors(w_power, C_RED, NULL);
-    ox_widget_set_label_text(w_power, "off");
-    ox_widget_set_click(w_power, power_click);
-    bar_add(&right, w_power);
-
-    /* ── popup ── */
-    Bar popup = { .height = h, .padding = pad, .fg = C_FG, .bg = C_BG, .sep = C_SEP };
-    OxWidget *w_shutdown = ox_widget_new("shutdown", 0);
-    ox_widget_set_label_text(w_shutdown, "Shutdown");
-    ox_widget_set_click(w_shutdown, power_shutdown);
-    bar_add(&popup, w_shutdown);
-    OxWidget *w_reboot = ox_widget_new("reboot", 0);
-    ox_widget_set_label_text(w_reboot, "Reboot");
-    ox_widget_set_click(w_reboot, power_reboot);
-    bar_add(&popup, w_reboot);
-    OxWidget *w_exit = ox_widget_new("exit", 0);
-    ox_widget_set_label_text(w_exit, "Exit");
-    ox_widget_set_click(w_exit, power_exit);
-    bar_add(&popup, w_exit);
+    OxWidget *w_clock = ox_widget_new("clock", 1.0);
+    ox_widget_set_colors(w_clock, C_FG, NULL);
+    ox_widget_set_update(w_clock, clock_update, NULL);
+    bar_add(&s->right, w_clock);
 
     /* ── update all widgets first ── */
-    for (int i = 0; i < center.count; i++) ox_widget_update(center.widgets[i]);
-    for (int i = 0; i < right.count; i++) ox_widget_update(right.widgets[i]);
+    for (int i = 0; i < s->center.count; i++) ox_widget_update(s->center.widgets[i]);
+    for (int i = 0; i < s->right.count; i++) ox_widget_update(s->right.widgets[i]);
 
     /* ── measure ── */
     OxWindow *tmp = ox_window_new(-100, -100, 1, 1);
     ox_window_set_font(tmp, font);
     int cw = pad;
-    for (int i = 0; i < center.count; i++)
-        cw += ox_text_width(tmp, ox_widget_get_label(center.widgets[i])) + pad;
+    for (int i = 0; i < s->center.count; i++)
+        cw += ox_text_width(tmp, ox_widget_get_label(s->center.widgets[i])) + pad;
     int rw = pad;
-    for (int i = 0; i < right.count; i++) {
+    for (int i = 0; i < s->right.count; i++) {
         if (i > 0) rw += ox_text_width(tmp, "|") + pad;
         rw += ICON_SZ + pad;
-        rw += ox_text_width(tmp, ox_widget_get_label(right.widgets[i])) + pad;
+        rw += ox_text_width(tmp, ox_widget_get_label(s->right.widgets[i])) + pad;
     }
-    int pw = pad;
-    for (int i = 0; i < popup.count; i++)
-        pw += ox_text_width(tmp, ox_widget_get_label(popup.widgets[i])) + pad;
     ox_window_destroy(tmp);
-
-    center.width = cw;
-    right.width = rw;
+    s->center.width = cw;
+    s->right.width = rw;
 
     /* ── create windows ── */
-    left.win = ox_window_new(0, 0, left.width, h);
-    ox_window_set_bg(left.win, left.bg);
-    ox_window_set_font(left.win, font);
-    ox_window_set_render(left.win, render_left, &left);
+    s->left.win = ox_window_new(0, 0, s->left.width, h);
+    ox_window_set_bg(s->left.win, s->left.bg);
+    ox_window_set_font(s->left.win, font);
 
-    center.win = ox_window_new((sw - cw) / 2, 0, cw, h);
-    ox_window_set_bg(center.win, center.bg);
-    ox_window_set_font(center.win, font);
-    ox_window_set_render(center.win, render_center, &center);
+    s->center.win = ox_window_new((sw - cw) / 2, 0, cw, h);
+    ox_window_set_bg(s->center.win, s->center.bg);
+    ox_window_set_font(s->center.win, font);
 
-    right.win = ox_window_new(sw - rw, 0, rw, h);
-    ox_window_set_bg(right.win, right.bg);
-    ox_window_set_font(right.win, font);
-    ox_window_set_strut(right.win, h, 0, 0, 0);
-    ox_window_set_render(right.win, render_right, &right);
+    s->right.win = ox_window_new(sw - rw, 0, rw, h);
+    ox_window_set_bg(s->right.win, s->right.bg);
+    ox_window_set_font(s->right.win, font);
+    ox_window_set_strut(s->right.win, h, 0, 0, 0);
 
-    popup.win = ox_window_new(sw - pw, 0, pw, h);
-    ox_window_set_bg(popup.win, popup.bg);
-    ox_window_set_font(popup.win, font);
-
-    ox_window_show(left.win);
-    ox_window_show(center.win);
-    ox_window_show(right.win);
+    ox_window_show(s->left.win);
+    ox_window_show(s->center.win);
+    ox_window_show(s->right.win);
 
     /* ── initial render ── */
-    render_left(left.win, &left);
-    render_center(center.win, &center);
-    render_right(right.win, &right);
+    render_left(s->left.win, s);
+    render_center(s->center.win, s);
+    render_right(s->right.win, s);
 
-    int last_desktop = get_current_desktop();
+    s->current_desktop = get_current_desktop();
 
-    struct timespec ts = { .tv_sec = 0, .tv_nsec = 100000000 };
-    struct timespec now_ts;
-    clock_gettime(CLOCK_MONOTONIC, &now_ts);
+    /* ── run ── */
+    OxMain loop = {
+        .on_event = on_event,
+        .on_timeout = on_timeout,
+        .ctx = s,
+        .ipc_fd = -1,
+        .timeout_ms = 100,
+    };
+    ox_main(&loop);
 
-    for (;;) {
-        clock_gettime(CLOCK_MONOTONIC, &now_ts);
-        double cur = now_ts.tv_sec + now_ts.tv_nsec / 1e9;
-
-        if (show_power) { show_power = 0; ox_window_show(popup.win); }
-
-        /* update widgets */
-        for (int i = 0; i < right.count; i++) {
-            OxWidget *w = right.widgets[i];
-            if (ox_widget_get_interval(w) > 0 &&
-                cur - ox_widget_get_last_update(w) >= ox_widget_get_interval(w)) {
-                ox_widget_update(w);
-                ox_widget_set_last_update(w, cur);
-            }
-        }
-
-        /* check if any widget changed */
-        int any_dirty = 0;
-        for (int i = 0; i < right.count; i++)
-            if (ox_widget_is_dirty(right.widgets[i])) any_dirty = 1;
-
-        /* workspace change */
-        int cur_d = get_current_desktop();
-        if (cur_d != last_desktop) { last_desktop = cur_d; any_dirty = 1; }
-
-        /* redraw only if something changed */
-        if (any_dirty) {
-            render_center(center.win, &center);
-            render_right(right.win, &right);
-            for (int i = 0; i < center.count; i++) ox_widget_clear_dirty(center.widgets[i]);
-            for (int i = 0; i < right.count; i++) ox_widget_clear_dirty(right.widgets[i]);
-        }
-
-        /* handle events */
-        Display *dpy = ox_display();
-        while (XPending(dpy) > 0) {
-            XEvent ev;
-            XNextEvent(dpy, &ev);
-            if (ev.type == Expose) {
-                render_left(left.win, &left);
-                render_center(center.win, &center);
-                render_right(right.win, &right);
-            }
-            if (ev.type == ButtonPress) {
-                if (ev.xbutton.window == ox_window_handle(popup.win)) {
-                    int ccx = popup.padding;
-                    for (int i = 0; i < popup.count; i++) {
-                        int ww = ox_text_width(popup.win, ox_widget_get_label(popup.widgets[i])) + popup.padding;
-                        if (ev.xbutton.x >= ccx && ev.xbutton.x < ccx + ww) {
-                            ox_widget_do_click(popup.widgets[i]);
-                            ox_window_hide(popup.win);
-                            break;
-                        }
-                        ccx += ww + popup.padding;
-                    }
-                }
-                if (ev.xbutton.window == ox_window_handle(center.win)) {
-                    int ccx = center.padding;
-                    for (int i = 0; i < center.count; i++) {
-                        char num[2] = { '1' + i, 0 };
-                        int ww = ox_text_width(center.win, num) + center.padding;
-                        if (ev.xbutton.x >= ccx && ev.xbutton.x < ccx + ww) {
-                            ox_widget_do_click(center.widgets[i]);
-                            break;
-                        }
-                        ccx += ww + center.padding;
-                    }
-                }
-                if (ev.xbutton.window == ox_window_handle(right.win)) {
-                    int ccx = right.padding;
-                    for (int i = 0; i < right.count; i++) {
-                        int ww = ICON_SZ + right.padding +
-                                 ox_text_width(right.win, ox_widget_get_label(right.widgets[i])) + right.padding;
-                        if (i > 0) ww += ox_text_width(right.win, "|") + right.padding;
-                        if (ev.xbutton.x >= ccx && ev.xbutton.x < ccx + ww) {
-                            ox_widget_do_click(right.widgets[i]);
-                            break;
-                        }
-                        ccx += ww;
-                    }
-                }
-            }
-        }
-
-        XFlush(dpy);
-        nanosleep(&ts, NULL);
-    }
-
+    ox_window_destroy(s->left.win);
+    ox_window_destroy(s->center.win);
+    ox_window_destroy(s->right.win);
+    ox_cleanup();
     return 0;
 }

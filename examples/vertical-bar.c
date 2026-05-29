@@ -14,9 +14,7 @@ typedef struct {
     const char *fg, *bg;
 } VStack;
 
-static void vstack_add(VStack *v, OxWidget *w) {
-    v->widgets[v->count++] = w;
-}
+static void vstack_add(VStack *v, OxWidget *w) { v->widgets[v->count++] = w; }
 
 static void vstack_render(VStack *v) {
     ox_draw_rect(v->win, 0, 0, v->width, v->height, v->bg);
@@ -80,62 +78,56 @@ static void load_update(void *ctx, char *buf, size_t len) {
     snprintf(buf, len, "%.1f", load[0]);
 }
 
+static void on_timeout(OxMain *m, double now) {
+    VStack *v = m->ctx;
+    for (int i = 0; i < v->count; i++) {
+        OxWidget *w = v->widgets[i];
+        if (ox_widget_get_interval(w) > 0 &&
+            now - ox_widget_get_last_update(w) >= ox_widget_get_interval(w)) {
+            ox_widget_update(w);
+            ox_widget_set_last_update(w, now);
+        }
+    }
+    vstack_render(v);
+}
+
+static void on_event(OxMain *m, XEvent *ev) {
+    if (ev->type == Expose) vstack_render(m->ctx);
+}
+
 int main(void) {
     ox_init();
     int sh = DisplayHeight(ox_display(), ox_screen());
-
     int width = 60, height = sh, pad = 8;
+
     VStack stack = { .width = width, .height = height, .padding = pad,
-        .fg = "#ffffff", .bg = "#111111" };
+                     .fg = "#ffffff", .bg = "#111111" };
     stack.win = ox_window_new(0, 0, width, height);
     ox_window_set_bg(stack.win, stack.bg);
     ox_window_set_font(stack.win, "monospace:size=10");
     ox_window_show(stack.win);
 
-    OxWidget *wt = ox_widget_new("time", 1.0);
-    ox_widget_set_icon(wt, "T");
-    ox_widget_set_update(wt, time_update, NULL);
-    vstack_add(&stack, wt);
+    vstack_add(&stack, ox_widget_new("time", 1.0));
+    ox_widget_set_icon(stack.widgets[0], "T");
+    ox_widget_set_update(stack.widgets[0], time_update, NULL);
 
-    OxWidget *wc = ox_widget_new("cpu", 2.0);
-    ox_widget_set_icon(wc, "C");
-    ox_widget_set_update(wc, cpu_update, NULL);
-    vstack_add(&stack, wc);
+    vstack_add(&stack, ox_widget_new("cpu", 2.0));
+    ox_widget_set_icon(stack.widgets[1], "C");
+    ox_widget_set_update(stack.widgets[1], cpu_update, NULL);
 
-    OxWidget *wm = ox_widget_new("mem", 2.0);
-    ox_widget_set_icon(wm, "M");
-    ox_widget_set_update(wm, mem_update, NULL);
-    vstack_add(&stack, wm);
+    vstack_add(&stack, ox_widget_new("mem", 2.0));
+    ox_widget_set_icon(stack.widgets[2], "M");
+    ox_widget_set_update(stack.widgets[2], mem_update, NULL);
 
-    OxWidget *wl = ox_widget_new("load", 1.0);
-    ox_widget_set_icon(wl, "L");
-    ox_widget_set_update(wl, load_update, NULL);
-    vstack_add(&stack, wl);
+    vstack_add(&stack, ox_widget_new("load", 1.0));
+    ox_widget_set_icon(stack.widgets[3], "L");
+    ox_widget_set_update(stack.widgets[3], load_update, NULL);
 
-    struct timespec ts = { .tv_sec = 0, .tv_nsec = 100000000 };
-    struct timespec now_ts;
-    clock_gettime(CLOCK_MONOTONIC, &now_ts);
+    for (int i = 0; i < stack.count; i++) ox_widget_update(stack.widgets[i]);
+    vstack_render(&stack);
 
-    for (;;) {
-        clock_gettime(CLOCK_MONOTONIC, &now_ts);
-        double cur = now_ts.tv_sec + now_ts.tv_nsec / 1e9;
-
-        for (int i = 0; i < stack.count; i++) {
-            OxWidget *w = stack.widgets[i];
-            if (ox_widget_get_interval(w) > 0 &&
-                cur - ox_widget_get_last_update(w) >= ox_widget_get_interval(w)) {
-                ox_widget_update(w);
-                ox_widget_set_last_update(w, cur);
-            }
-        }
-
-        vstack_render(&stack);
-
-        Display *dpy = ox_display();
-        while (XPending(dpy) > 0) { XEvent ev; XNextEvent(dpy, &ev); }
-        XFlush(dpy);
-        nanosleep(&ts, NULL);
-    }
-
+    OxMain loop = { .on_event = on_event, .on_timeout = on_timeout, .ctx = &stack, .timeout_ms = 100 };
+    ox_main(&loop);
+    ox_cleanup();
     return 0;
 }

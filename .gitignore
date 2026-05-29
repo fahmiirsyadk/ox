@@ -2,8 +2,10 @@
 *.d
 *.a
 build/
+libox.pc
 simple-bar
 multi-bar
 vertical-bar
 osd
 xmobar
+search

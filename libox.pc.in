@@ -1,0 +1,9 @@
+prefix=@PREFIX@
+libdir=@LIBDIR@
+includedir=@INCLUDEDIR@/ox
+
+Name: libox
+Description: Minimal C toolkit for X11 status bars and widgets
+Version: @VERSION@
+Cflags: @CFLAGS@
+Libs: @LIBS@

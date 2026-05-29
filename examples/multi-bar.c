@@ -13,41 +13,44 @@ typedef struct {
     const char *fg, *bg, *sep;
 } Bar;
 
-static void bar_add(Bar *bar, OxWidget *w) {
-    bar->widgets[bar->count++] = w;
-}
+typedef struct {
+    Bar left, center, right;
+    OxWidget *all[6];
+    int nw;
+} MultiState;
 
-static int bar_content_width(Bar *bar) {
-    int total = bar->padding;
-    for (int i = 0; i < bar->count; i++) {
-        if (i > 0)
-            total += ox_text_width(bar->win, " | ") + bar->padding;
-        const char *icon = ox_widget_get_icon(bar->widgets[i]);
-        const char *label = ox_widget_get_label(bar->widgets[i]);
-        if (icon) total += ox_text_width(bar->win, icon);
-        total += ox_text_width(bar->win, label) + bar->padding;
+static void bar_add(Bar *b, OxWidget *w) { b->widgets[b->count++] = w; }
+
+static int bar_content_width(Bar *b) {
+    int total = b->padding;
+    for (int i = 0; i < b->count; i++) {
+        if (i > 0) total += ox_text_width(b->win, " | ") + b->padding;
+        const char *icon = ox_widget_get_icon(b->widgets[i]);
+        const char *label = ox_widget_get_label(b->widgets[i]);
+        if (icon) total += ox_text_width(b->win, icon);
+        total += ox_text_width(b->win, label) + b->padding;
     }
     return total;
 }
 
-static void bar_render(Bar *bar) {
-    int cy = bar->height / 2 + ox_text_width(bar->win, "X") / 3;
-    int w = bar_content_width(bar);
-    ox_draw_rect(bar->win, 0, 0, w, bar->height, bar->bg);
-    int cx = bar->padding;
-    for (int i = 0; i < bar->count; i++) {
+static void bar_render(Bar *b) {
+    int cy = b->height / 2 + ox_text_width(b->win, "X") / 3;
+    int w = bar_content_width(b);
+    ox_draw_rect(b->win, 0, 0, w, b->height, b->bg);
+    int cx = b->padding;
+    for (int i = 0; i < b->count; i++) {
         if (i > 0) {
-            ox_draw_text(bar->win, cx, cy, " | ", bar->sep);
-            cx += ox_text_width(bar->win, " | ") + bar->padding;
+            ox_draw_text(b->win, cx, cy, " | ", b->sep);
+            cx += ox_text_width(b->win, " | ") + b->padding;
         }
-        const char *icon = ox_widget_get_icon(bar->widgets[i]);
-        const char *label = ox_widget_get_label(bar->widgets[i]);
+        const char *icon = ox_widget_get_icon(b->widgets[i]);
+        const char *label = ox_widget_get_label(b->widgets[i]);
         if (icon) {
-            ox_draw_text(bar->win, cx, cy, icon, bar->fg);
-            cx += ox_text_width(bar->win, icon);
+            ox_draw_text(b->win, cx, cy, icon, b->fg);
+            cx += ox_text_width(b->win, icon);
         }
-        ox_draw_text(bar->win, cx, cy, label, bar->fg);
-        cx += ox_text_width(bar->win, label) + bar->padding;
+        ox_draw_text(b->win, cx, cy, label, b->fg);
+        cx += ox_text_width(b->win, label) + b->padding;
     }
 }
 
@@ -107,9 +110,7 @@ static void vol_update(void *ctx, char *buf, size_t len) {
     if (fgets(buf, len, f)) {
         size_t n = strlen(buf);
         while (n > 0 && (buf[n-1] == '\n' || buf[n-1] == '\r')) buf[--n] = '\0';
-    } else {
-        snprintf(buf, len, "??%%");
-    }
+    } else snprintf(buf, len, "??%%");
     pclose(f);
 }
 
@@ -123,128 +124,123 @@ static void bright_update(void *ctx, char *buf, size_t len) {
     snprintf(buf, len, "%ld%%", cur * 100 / max);
 }
 
+static void on_timeout(OxMain *m, double now) {
+    MultiState *s = m->ctx;
+    for (int i = 0; i < s->nw; i++) {
+        OxWidget *w = s->all[i];
+        if (ox_widget_get_interval(w) > 0 &&
+            now - ox_widget_get_last_update(w) >= ox_widget_get_interval(w)) {
+            ox_widget_update(w);
+            ox_widget_set_last_update(w, now);
+        }
+    }
+    bar_render(&s->left);
+    bar_render(&s->center);
+    bar_render(&s->right);
+}
+
+static void on_event(OxMain *m, XEvent *ev) {
+    (void)ev;
+    MultiState *s = m->ctx;
+    bar_render(&s->left);
+    bar_render(&s->center);
+    bar_render(&s->right);
+}
+
 int main(void) {
     ox_init();
     int sw = DisplayWidth(ox_display(), ox_screen());
     int h = 24, pad = 8;
     const char *font = "monospace:size=11";
 
-    /* left: time, cpu, mem */
-    Bar left = { .height = h, .padding = pad, .fg = "#ffffff", .bg = "#000000", .sep = "#555555" };
-    bar_add(&left, ox_widget_new("time", 1.0));
-    ox_widget_set_icon(left.widgets[0], "TIME");
-    ox_widget_set_update(left.widgets[0], time_update, NULL);
+    MultiState state = {0};
+    MultiState *s = &state;
 
-    bar_add(&left, ox_widget_new("cpu", 2.0));
-    ox_widget_set_icon(left.widgets[1], "CPU");
-    ox_widget_set_update(left.widgets[1], cpu_update, NULL);
+    s->left = (Bar){ .height = h, .padding = pad, .fg = "#ffffff", .bg = "#000000", .sep = "#555555" };
+    bar_add(&s->left, ox_widget_new("time", 1.0));
+    ox_widget_set_icon(s->left.widgets[0], "TIME");
+    ox_widget_set_update(s->left.widgets[0], time_update, NULL);
+    bar_add(&s->left, ox_widget_new("cpu", 2.0));
+    ox_widget_set_icon(s->left.widgets[1], "CPU");
+    ox_widget_set_update(s->left.widgets[1], cpu_update, NULL);
+    bar_add(&s->left, ox_widget_new("mem", 2.0));
+    ox_widget_set_icon(s->left.widgets[2], "MEM");
+    ox_widget_set_update(s->left.widgets[2], mem_update, NULL);
 
-    bar_add(&left, ox_widget_new("mem", 2.0));
-    ox_widget_set_icon(left.widgets[2], "MEM");
-    ox_widget_set_update(left.widgets[2], mem_update, NULL);
+    s->center = (Bar){ .height = h, .padding = pad, .fg = "#ffffff", .bg = "#000000", .sep = "#555555" };
+    bar_add(&s->center, ox_widget_new("date", 60.0));
+    ox_widget_set_icon(s->center.widgets[0], "DATE");
+    ox_widget_set_update(s->center.widgets[0], date_update, NULL);
 
-    /* center: date */
-    Bar center = { .height = h, .padding = pad, .fg = "#ffffff", .bg = "#000000", .sep = "#555555" };
-    bar_add(&center, ox_widget_new("date", 60.0));
-    ox_widget_set_icon(center.widgets[0], "DATE");
-    ox_widget_set_update(center.widgets[0], date_update, NULL);
+    s->right = (Bar){ .height = h, .padding = pad, .fg = "#ffffff", .bg = "#000000", .sep = "#555555" };
+    bar_add(&s->right, ox_widget_new("vol", 2.0));
+    ox_widget_set_icon(s->right.widgets[0], "VOL");
+    ox_widget_set_update(s->right.widgets[0], vol_update, NULL);
+    bar_add(&s->right, ox_widget_new("bright", 5.0));
+    ox_widget_set_icon(s->right.widgets[1], "LIT");
+    ox_widget_set_update(s->right.widgets[1], bright_update, NULL);
 
-    /* right: vol, bright */
-    Bar right = { .height = h, .padding = pad, .fg = "#ffffff", .bg = "#000000", .sep = "#555555" };
-    bar_add(&right, ox_widget_new("vol", 2.0));
-    ox_widget_set_icon(right.widgets[0], "VOL");
-    ox_widget_set_update(right.widgets[0], vol_update, NULL);
+    s->all[0] = s->left.widgets[0];
+    s->all[1] = s->left.widgets[1];
+    s->all[2] = s->left.widgets[2];
+    s->all[3] = s->center.widgets[0];
+    s->all[4] = s->right.widgets[0];
+    s->all[5] = s->right.widgets[1];
+    s->nw = 6;
 
-    bar_add(&right, ox_widget_new("bright", 5.0));
-    ox_widget_set_icon(right.widgets[1], "LIT");
-    ox_widget_set_update(right.widgets[1], bright_update, NULL);
+    for (int i = 0; i < s->nw; i++) ox_widget_update(s->all[i]);
 
-    /* update all widgets to get initial content */
-    for (int i = 0; i < left.count; i++) ox_widget_update(left.widgets[i]);
-    for (int i = 0; i < center.count; i++) ox_widget_update(center.widgets[i]);
-    for (int i = 0; i < right.count; i++) ox_widget_update(right.widgets[i]);
-
-    /* measure content widths */
-    /* create temp windows just for measuring */
     OxWindow *tmp = ox_window_new(-100, -100, 1, 1);
     ox_window_set_font(tmp, font);
-
     int lw = pad;
-    for (int i = 0; i < left.count; i++) {
+    for (int i = 0; i < s->left.count; i++) {
         if (i > 0) lw += ox_text_width(tmp, " | ") + pad;
-        const char *icon = ox_widget_get_icon(left.widgets[i]);
-        const char *label = ox_widget_get_label(left.widgets[i]);
+        const char *icon = ox_widget_get_icon(s->left.widgets[i]);
+        const char *label = ox_widget_get_label(s->left.widgets[i]);
         if (icon) lw += ox_text_width(tmp, icon);
         lw += ox_text_width(tmp, label) + pad;
     }
-
     int cw = pad;
-    for (int i = 0; i < center.count; i++) {
+    for (int i = 0; i < s->center.count; i++) {
         if (i > 0) cw += ox_text_width(tmp, " | ") + pad;
-        const char *icon = ox_widget_get_icon(center.widgets[i]);
-        const char *label = ox_widget_get_label(center.widgets[i]);
+        const char *icon = ox_widget_get_icon(s->center.widgets[i]);
+        const char *label = ox_widget_get_label(s->center.widgets[i]);
         if (icon) cw += ox_text_width(tmp, icon);
         cw += ox_text_width(tmp, label) + pad;
     }
-
     int rw = pad;
-    for (int i = 0; i < right.count; i++) {
+    for (int i = 0; i < s->right.count; i++) {
         if (i > 0) rw += ox_text_width(tmp, " | ") + pad;
-        const char *icon = ox_widget_get_icon(right.widgets[i]);
-        const char *label = ox_widget_get_label(right.widgets[i]);
+        const char *icon = ox_widget_get_icon(s->right.widgets[i]);
+        const char *label = ox_widget_get_label(s->right.widgets[i]);
         if (icon) rw += ox_text_width(tmp, icon);
         rw += ox_text_width(tmp, label) + pad;
     }
-
     ox_window_destroy(tmp);
 
-    /* create windows at final positions */
-    left.win = ox_window_new(0, 0, lw, h);
-    ox_window_set_bg(left.win, left.bg);
-    ox_window_set_font(left.win, font);
-    ox_window_set_strut(left.win, h, 0, 0, 0);
+    s->left.win = ox_window_new(0, 0, lw, h);
+    ox_window_set_bg(s->left.win, s->left.bg);
+    ox_window_set_font(s->left.win, font);
+    ox_window_set_strut(s->left.win, h, 0, 0, 0);
 
-    center.win = ox_window_new((sw - cw) / 2, 0, cw, h);
-    ox_window_set_bg(center.win, center.bg);
-    ox_window_set_font(center.win, font);
+    s->center.win = ox_window_new((sw - cw) / 2, 0, cw, h);
+    ox_window_set_bg(s->center.win, s->center.bg);
+    ox_window_set_font(s->center.win, font);
 
-    right.win = ox_window_new(sw - rw, 0, rw, h);
-    ox_window_set_bg(right.win, right.bg);
-    ox_window_set_font(right.win, font);
+    s->right.win = ox_window_new(sw - rw, 0, rw, h);
+    ox_window_set_bg(s->right.win, s->right.bg);
+    ox_window_set_font(s->right.win, font);
 
-    ox_window_show(left.win);
-    ox_window_show(center.win);
-    ox_window_show(right.win);
+    ox_window_show(s->left.win);
+    ox_window_show(s->center.win);
+    ox_window_show(s->right.win);
 
-    Bar *bars[] = { &left, &center, &right };
-    OxWidget *all[] = { left.widgets[0], left.widgets[1], left.widgets[2],
-                        center.widgets[0], right.widgets[0], right.widgets[1] };
-    int nw = 6;
+    bar_render(&s->left);
+    bar_render(&s->center);
+    bar_render(&s->right);
 
-    struct timespec ts = { .tv_sec = 0, .tv_nsec = 100000000 };
-    struct timespec now_ts;
-    clock_gettime(CLOCK_MONOTONIC, &now_ts);
-
-    for (;;) {
-        clock_gettime(CLOCK_MONOTONIC, &now_ts);
-        double cur = now_ts.tv_sec + now_ts.tv_nsec / 1e9;
-
-        for (int i = 0; i < nw; i++) {
-            OxWidget *w = all[i];
-            if (ox_widget_get_interval(w) > 0 &&
-                cur - ox_widget_get_last_update(w) >= ox_widget_get_interval(w)) {
-                ox_widget_update(w);
-                ox_widget_set_last_update(w, cur);
-            }
-        }
-
-        for (int i = 0; i < 3; i++) bar_render(bars[i]);
-
-        Display *dpy = ox_display();
-        while (XPending(dpy) > 0) { XEvent ev; XNextEvent(dpy, &ev); }
-        XFlush(dpy);
-        nanosleep(&ts, NULL);
-    }
-
+    OxMain loop = { .on_event = on_event, .on_timeout = on_timeout, .ctx = s, .timeout_ms = 100 };
+    ox_main(&loop);
+    ox_cleanup();
     return 0;
 }
