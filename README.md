@@ -110,85 +110,73 @@ References link to source on GitHub (oxbar repo).
 
 ### Core
 
-| Function | Source |
-|----------|--------|
-| `ox_init()` | [src/draw.c:88](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L88) |
-| `ox_cleanup()` | [src/draw.c:93](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L93) |
-| `ox_main(OxMain*)` | [src/loop.c:77](https://github.com/fahmiirsyadk/oxbar/blob/main/src/loop.c#L77) |
-| `ox_quit(OxMain*)` | [src/loop.c:73](https://github.com/fahmiirsyadk/oxbar/blob/main/src/loop.c#L73) |
-| `ox_display()` | [src/draw.c:85](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L85) |
-| `ox_screen()` | [src/draw.c:86](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L86) |
+- `ox_init()` [src/draw.c:88](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L88)
+- `ox_cleanup()` [src/draw.c:93](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L93)
+- `ox_main(OxMain*)` [src/loop.c:77](https://github.com/fahmiirsyadk/oxbar/blob/main/src/loop.c#L77)
+- `ox_quit(OxMain*)` [src/loop.c:73](https://github.com/fahmiirsyadk/oxbar/blob/main/src/loop.c#L73)
+- `ox_display()` [src/draw.c:85](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L85)
+- `ox_screen()` [src/draw.c:86](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L86)
 
 ### Widget
 
-| Function | Source |
-|----------|--------|
-| `ox_widget_new()` | [src/widget.c:97](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L97) |
-| `ox_widget_destroy()` | [src/widget.c:106](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L106) |
-| `ox_widget_set_update()` | [src/widget.c:121](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L121) |
-| `ox_widget_set_click()` | [src/widget.c:126](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L126) |
-| `ox_widget_set_icon()` | [src/widget.c:130](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L130) |
-| `ox_widget_set_cmd()` | [src/widget.c:135](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L135) |
-| `ox_widget_set_label_text()` | [src/widget.c:140](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L140) |
-| `ox_widget_set_colors()` | [src/widget.c:149](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L149) |
-| `ox_widget_update()` | [src/widget.c:251](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L251) |
-| `ox_widget_do_click()` | [src/widget.c:266](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L266) |
-| `ox_widget_get_fd()` | [src/widget.c:197](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L197) |
-| `ox_widget_read()` | [src/widget.c:214](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L214) |
-| `ox_widget_get_label()` | [src/widget.c:270](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L270) |
-| `ox_widget_get_icon()` | [src/widget.c:271](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L271) |
-| `ox_widget_get_fg()` | [src/widget.c:272](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L272) |
-| `ox_widget_get_bg()` | [src/widget.c:273](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L273) |
-| `ox_widget_get_interval()` | [src/widget.c:274](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L274) |
-| `ox_widget_get_last_update()` | [src/widget.c:275](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L275) |
-| `ox_widget_set_last_update()` | [src/widget.c:276](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L276) |
-| `ox_widget_is_dirty()` | [src/widget.c:277](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L277) |
-| `ox_widget_clear_dirty()` | [src/widget.c:278](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L278) |
+- `ox_widget_new()` [src/widget.c:97](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L97)
+- `ox_widget_destroy()` [src/widget.c:106](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L106)
+- `ox_widget_set_update()` [src/widget.c:121](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L121)
+- `ox_widget_set_click()` [src/widget.c:126](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L126)
+- `ox_widget_set_icon()` [src/widget.c:130](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L130)
+- `ox_widget_set_cmd()` [src/widget.c:135](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L135)
+- `ox_widget_set_label_text()` [src/widget.c:140](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L140)
+- `ox_widget_set_colors()` [src/widget.c:149](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L149)
+- `ox_widget_update()` [src/widget.c:251](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L251)
+- `ox_widget_do_click()` [src/widget.c:266](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L266)
+- `ox_widget_get_fd()` [src/widget.c:197](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L197)
+- `ox_widget_read()` [src/widget.c:214](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L214)
+- `ox_widget_get_label()` [src/widget.c:270](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L270)
+- `ox_widget_get_icon()` [src/widget.c:271](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L271)
+- `ox_widget_get_fg()` [src/widget.c:272](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L272)
+- `ox_widget_get_bg()` [src/widget.c:273](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L273)
+- `ox_widget_get_interval()` [src/widget.c:274](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L274)
+- `ox_widget_get_last_update()` [src/widget.c:275](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L275)
+- `ox_widget_set_last_update()` [src/widget.c:276](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L276)
+- `ox_widget_is_dirty()` [src/widget.c:277](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L277)
+- `ox_widget_clear_dirty()` [src/widget.c:278](https://github.com/fahmiirsyadk/oxbar/blob/main/src/widget.c#L278)
 
 ### Window
 
-| Function | Source |
-|----------|--------|
-| `ox_window_new()` | [src/draw.c:121](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L121) |
-| `ox_window_new_floating()` | [src/draw.c:157](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L157) |
-| `ox_window_destroy()` | [src/draw.c:168](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L168) |
-| `ox_window_set_bg()` | [src/draw.c:179](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L179) |
-| `ox_window_set_font()` | [src/draw.c:184](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L184) |
-| `ox_window_set_strut()` | [src/draw.c:189](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L189) |
-| `ox_window_set_wm_class()` | [src/draw.c:204](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L204) |
-| `ox_window_show()` | [src/draw.c:212](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L212) |
-| `ox_window_hide()` | [src/draw.c:218](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L218) |
-| `ox_window_handle()` | [src/draw.c:224](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L224) |
+- `ox_window_new()` [src/draw.c:121](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L121)
+- `ox_window_new_floating()` [src/draw.c:157](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L157)
+- `ox_window_destroy()` [src/draw.c:168](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L168)
+- `ox_window_set_bg()` [src/draw.c:179](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L179)
+- `ox_window_set_font()` [src/draw.c:184](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L184)
+- `ox_window_set_strut()` [src/draw.c:189](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L189)
+- `ox_window_set_wm_class()` [src/draw.c:204](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L204)
+- `ox_window_show()` [src/draw.c:212](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L212)
+- `ox_window_hide()` [src/draw.c:218](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L218)
+- `ox_window_handle()` [src/draw.c:224](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L224)
 
 ### Draw
 
-| Function | Source |
-|----------|--------|
-| `ox_draw_rect()` | [src/draw.c:234](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L234) |
-| `ox_draw_text()` | [src/draw.c:273](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L273) |
-| `ox_draw_xpm()` | [src/draw.c:301](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L301) |
-| `ox_text_width()` | [src/draw.c:284](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L284) |
+- `ox_draw_rect()` [src/draw.c:234](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L234)
+- `ox_draw_text()` [src/draw.c:273](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L273)
+- `ox_draw_xpm()` [src/draw.c:301](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L301)
+- `ox_text_width()` [src/draw.c:284](https://github.com/fahmiirsyadk/oxbar/blob/main/src/draw.c#L284)
 
 ### IPC
 
-| Function | Source |
-|----------|--------|
-| `ox_ipc_init()` | [src/ipc.c:63](https://github.com/fahmiirsyadk/oxbar/blob/main/src/ipc.c#L63) |
-| `ox_ipc_fd()` | [src/ipc.c:84](https://github.com/fahmiirsyadk/oxbar/blob/main/src/ipc.c#L84) |
-| `ox_ipc_send()` | [src/ipc.c:88](https://github.com/fahmiirsyadk/oxbar/blob/main/src/ipc.c#L88) |
-| `ox_ipc_recv()` | [src/ipc.c:111](https://github.com/fahmiirsyadk/oxbar/blob/main/src/ipc.c#L111) |
-| `ox_ipc_cleanup()` | [src/ipc.c:138](https://github.com/fahmiirsyadk/oxbar/blob/main/src/ipc.c#L138) |
+- `ox_ipc_init()` [src/ipc.c:63](https://github.com/fahmiirsyadk/oxbar/blob/main/src/ipc.c#L63)
+- `ox_ipc_fd()` [src/ipc.c:84](https://github.com/fahmiirsyadk/oxbar/blob/main/src/ipc.c#L84)
+- `ox_ipc_send()` [src/ipc.c:88](https://github.com/fahmiirsyadk/oxbar/blob/main/src/ipc.c#L88)
+- `ox_ipc_recv()` [src/ipc.c:111](https://github.com/fahmiirsyadk/oxbar/blob/main/src/ipc.c#L111)
+- `ox_ipc_cleanup()` [src/ipc.c:138](https://github.com/fahmiirsyadk/oxbar/blob/main/src/ipc.c#L138)
 
 ### Types
 
-| Type | Source |
-|------|--------|
-| `OxMain` | [include/ox.h:17](https://github.com/fahmiirsyadk/oxbar/blob/main/include/ox.h#L17) |
-| `OxWidgetUpdate` | [include/ox.h:11](https://github.com/fahmiirsyadk/oxbar/blob/main/include/ox.h#L11) |
-| `OxWidgetClick` | [include/ox.h:12](https://github.com/fahmiirsyadk/oxbar/blob/main/include/ox.h#L12) |
-| `OxEventFn` | [include/ox.h:13](https://github.com/fahmiirsyadk/oxbar/blob/main/include/ox.h#L13) |
-| `OxTimeoutFn` | [include/ox.h:14](https://github.com/fahmiirsyadk/oxbar/blob/main/include/ox.h#L14) |
-| `OxIpcFn` | [include/ox.h:15](https://github.com/fahmiirsyadk/oxbar/blob/main/include/ox.h#L15) |
+- `OxMain` [include/ox.h:17](https://github.com/fahmiirsyadk/oxbar/blob/main/include/ox.h#L17)
+- `OxWidgetUpdate` [include/ox.h:11](https://github.com/fahmiirsyadk/oxbar/blob/main/include/ox.h#L11)
+- `OxWidgetClick` [include/ox.h:12](https://github.com/fahmiirsyadk/oxbar/blob/main/include/ox.h#L12)
+- `OxEventFn` [include/ox.h:13](https://github.com/fahmiirsyadk/oxbar/blob/main/include/ox.h#L13)
+- `OxTimeoutFn` [include/ox.h:14](https://github.com/fahmiirsyadk/oxbar/blob/main/include/ox.h#L14)
+- `OxIpcFn` [include/ox.h:15](https://github.com/fahmiirsyadk/oxbar/blob/main/include/ox.h#L15)
 
 
 ## [04] Widget Guide
