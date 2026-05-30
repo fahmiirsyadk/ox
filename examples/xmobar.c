@@ -38,8 +38,7 @@ typedef struct {
     Bar left, center, right;
     int current_desktop;
     int needs_redraw;
-    double last_wsp_check;
-    double last_wsp_click;
+    Atom net_current_desktop;
     char exe_dir[PATH_MAX];
     char bat_path[PATH_MAX];
 } XMBState;
@@ -177,15 +176,17 @@ static void clock_update(void *ctx, char *buf, size_t len) {
     strftime(buf, len, "%H:%M", t);
 }
 
-static void wsp_click_0(void *ctx) { (void)ctx; XMBState *s = g_xmobar; s->current_desktop = 0; s->needs_redraw = 1; struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); s->last_wsp_click = ts.tv_sec + ts.tv_nsec / 1e9; run_cmd("xdotool key super+1"); }
-static void wsp_click_1(void *ctx) { (void)ctx; XMBState *s = g_xmobar; s->current_desktop = 1; s->needs_redraw = 1; struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); s->last_wsp_click = ts.tv_sec + ts.tv_nsec / 1e9; run_cmd("xdotool key super+2"); }
-static void wsp_click_2(void *ctx) { (void)ctx; XMBState *s = g_xmobar; s->current_desktop = 2; s->needs_redraw = 1; struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); s->last_wsp_click = ts.tv_sec + ts.tv_nsec / 1e9; run_cmd("xdotool key super+3"); }
-static void wsp_click_3(void *ctx) { (void)ctx; XMBState *s = g_xmobar; s->current_desktop = 3; s->needs_redraw = 1; struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); s->last_wsp_click = ts.tv_sec + ts.tv_nsec / 1e9; run_cmd("xdotool key super+4"); }
-static void wsp_click_4(void *ctx) { (void)ctx; XMBState *s = g_xmobar; s->current_desktop = 4; s->needs_redraw = 1; struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); s->last_wsp_click = ts.tv_sec + ts.tv_nsec / 1e9; run_cmd("xdotool key super+5"); }
-
-static OxWidgetClick wsp_click_fns[NWSP] = {
-    wsp_click_0, wsp_click_1, wsp_click_2, wsp_click_3, wsp_click_4
-};
+static void wsp_click(void *ctx) {
+    (void)ctx;
+    XMBState *s = g_xmobar;
+    /* widget label is "1"-"5", convert to 0-based desktop index */
+    int idx = (int)(long)ctx;
+    s->current_desktop = idx;
+    s->needs_redraw = 1;
+    char cmd[32];
+    snprintf(cmd, sizeof(cmd), "xdotool key super+%d", idx + 1);
+    run_cmd(cmd);
+}
 
 static void render_left(OxWindow *win, void *ctx) {
     XMBState *s = ctx;
@@ -246,17 +247,6 @@ static int bar_hit_test(Bar *b, int x) {
 static void on_timeout(OxMain *m, double now) {
     XMBState *s = m->ctx;
 
-    /* slow poll: sync workspace from keyboard (skip right after click) */
-    if (now - s->last_wsp_check > 1.0 && now - s->last_wsp_click > 1.5) {
-        s->last_wsp_check = now;
-        int cd = get_current_desktop();
-        if (cd != s->current_desktop) {
-            s->current_desktop = cd;
-            s->needs_redraw = 1;
-        }
-    }
-
-    /* update right widgets */
     for (int i = 0; i < s->right.count; i++) {
         OxWidget *w = s->right.widgets[i];
         if (ox_widget_get_interval(w) > 0 &&
@@ -264,10 +254,8 @@ static void on_timeout(OxMain *m, double now) {
             ox_widget_update(w);
             ox_widget_set_last_update(w, now);
         }
-        /* check if async cmd produced output */
         int fd = ox_widget_get_fd(w);
         if (fd >= 0) {
-            /* add to extra_fds so select() monitors it */
             int found = 0;
             for (int j = 0; j < m->extra_fd_count; j++)
                 if (m->extra_fds[j] == fd) { found = 1; break; }
@@ -276,17 +264,14 @@ static void on_timeout(OxMain *m, double now) {
         }
     }
 
-    /* redraw if dirty */
     int any_dirty = s->needs_redraw;
     s->needs_redraw = 0;
     for (int i = 0; i < s->right.count; i++)
         if (ox_widget_is_dirty(s->right.widgets[i])) any_dirty = 1;
-    /* also check if any widget's async fd is ready */
     for (int i = 0; i < s->right.count; i++) {
         OxWidget *w = s->right.widgets[i];
         int fd = ox_widget_get_fd(w);
         if (fd >= 0) {
-            /* try non-blocking read */
             fd_set test;
             FD_ZERO(&test);
             FD_SET(fd, &test);
@@ -308,11 +293,21 @@ static void on_timeout(OxMain *m, double now) {
 
 static void on_event(OxMain *m, XEvent *ev) {
     XMBState *s = m->ctx;
+
+    if (ev->type == PropertyNotify && ev->xproperty.atom == s->net_current_desktop) {
+        int cd = get_current_desktop();
+        if (cd != s->current_desktop) {
+            s->current_desktop = cd;
+            render_center(s->center.win, s);
+        }
+    }
+
     if (ev->type == Expose) {
         render_left(s->left.win, s);
         render_center(s->center.win, s);
         render_right(s->right.win, s);
     }
+
     if (ev->type == ButtonPress) {
         if (ev->xbutton.window == ox_window_handle(s->center.win)) {
             int idx = bar_hit_test(&s->center, ev->xbutton.x);
@@ -340,21 +335,26 @@ int main(void) {
     int h = 28, pad = 8;
     const char *font = "monospace:size=11";
 
-    /* ── left: nix icon ── */
+    /* left: nix icon */
     s->left = (Bar){ .height = h, .padding = pad, .fg = C_FG, .bg = C_BG, .sep = C_SEP,
                      .width = 46 + pad * 2 };
 
-    /* ── center: workspaces ── */
+    /* center: workspaces */
     s->center = (Bar){ .height = h, .padding = pad, .fg = C_DIM, .bg = C_BG, .sep = C_SEP };
     for (int i = 0; i < NWSP; i++) {
         OxWidget *w = ox_widget_new("wsp", 0.2);
         ox_widget_set_update(w, wsp_update, (void *)(long)i);
-        ox_widget_set_click(w, wsp_click_fns[i]);
+        ox_widget_set_click(w, wsp_click);
+        /* store workspace index in icon so click handler can read it */
+        char name[4];
+        snprintf(name, sizeof(name), "%d", i);
+        ox_widget_set_icon(w, name);
         bar_add(&s->center, w);
     }
 
-    /* ── right: vol + bat + clock ── */
+    /* right: vol + bat + clock */
     s->right = (Bar){ .height = h, .padding = pad, .fg = C_DIM, .bg = C_BG, .sep = C_SEP };
+
     OxWidget *w_vol = ox_widget_new("vol", 5.0);
     ox_widget_set_colors(w_vol, C_ACC, NULL);
     ox_widget_set_update(w_vol, vol_update, NULL);
@@ -369,11 +369,11 @@ int main(void) {
     ox_widget_set_update(w_clock, clock_update, NULL);
     bar_add(&s->right, w_clock);
 
-    /* ── update all widgets first ── */
+    /* initial widget updates */
     for (int i = 0; i < s->center.count; i++) ox_widget_update(s->center.widgets[i]);
     for (int i = 0; i < s->right.count; i++) ox_widget_update(s->right.widgets[i]);
 
-    /* ── measure ── */
+    /* measure widths */
     OxWindow *tmp = ox_window_new(-100, -100, 1, 1);
     ox_window_set_font(tmp, font);
     int cw = pad;
@@ -389,7 +389,7 @@ int main(void) {
     s->center.width = cw;
     s->right.width = rw;
 
-    /* ── create windows ── */
+    /* create windows */
     s->left.win = ox_window_new(0, 0, s->left.width, h);
     ox_window_set_bg(s->left.win, s->left.bg);
     ox_window_set_font(s->left.win, font);
@@ -407,14 +407,18 @@ int main(void) {
     ox_window_show(s->center.win);
     ox_window_show(s->right.win);
 
-    /* ── initial render ── */
+    /* initial render */
     render_left(s->left.win, s);
     render_center(s->center.win, s);
     render_right(s->right.win, s);
 
+    /* subscribe to workspace changes via PropertyNotify */
+    s->net_current_desktop = XInternAtom(dpy, "_NET_CURRENT_DESKTOP", True);
+    if (s->net_current_desktop != None)
+        XSelectInput(dpy, RootWindow(dpy, screen), PropertyChangeMask);
     s->current_desktop = get_current_desktop();
 
-    /* ── run ── */
+    /* run */
     OxMain loop = {
         .on_event = on_event,
         .on_timeout = on_timeout,
