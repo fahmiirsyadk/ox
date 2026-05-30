@@ -122,7 +122,9 @@ static int get_current_desktop(void) {
 static void bar_add(Bar *b, OxWidget *w) { b->widgets[b->count++] = w; }
 
 static void wsp_update(void *ctx, char *buf, size_t len) {
-    snprintf(buf, len, "%d", (int)(long)ctx + 1);
+    (void)ctx;
+    int d = get_current_desktop();
+    snprintf(buf, len, "%d", d + 1);
 }
 
 static void vol_update(void *ctx, char *buf, size_t len) {
@@ -344,7 +346,7 @@ int main(void) {
     s->center = (Bar){ .height = h, .padding = pad, .fg = C_DIM, .bg = C_BG, .sep = C_SEP };
     for (int i = 0; i < NWSP; i++) {
         OxWidget *w = ox_widget_new("wsp", 0.2);
-        ox_widget_set_update(w, wsp_update, (void *)(long)i);
+        ox_widget_set_update(w, wsp_update, s);
         ox_widget_set_click(w, wsp_click_fns[i]);
         bar_add(&s->center, w);
     }
